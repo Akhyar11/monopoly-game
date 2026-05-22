@@ -1,0 +1,911 @@
+# PRD — Browser Multiplayer Monopoly Game Tanpa Giliran
+
+## 1. Ringkasan Produk
+
+Produk ini adalah game Monopoly berbasis browser yang dimainkan secara online oleh maksimal 4 pemain dalam satu room. Berbeda dari Monopoly klasik yang memakai sistem giliran, game ini menggunakan konsep **free-roll real-time**, yaitu setiap pemain dapat melempar dadu kapan saja saat memenuhi syarat tertentu, tanpa menunggu giliran pemain lain.
+
+Tujuan utama produk adalah menciptakan pengalaman Monopoly yang lebih cepat, dinamis, kompetitif, dan cocok untuk permainan online singkat.
+
+---
+
+## 2. Tujuan Produk
+
+### Tujuan Utama
+
+* Membuat game Monopoly online multiplayer yang dapat dimainkan langsung dari browser.
+* Mendukung 4 pemain dalam satu room.
+* Menghilangkan sistem giliran klasik dan menggantinya dengan mekanisme lempar dadu bebas.
+* Menjaga permainan tetap adil meskipun semua pemain bisa bergerak secara bersamaan.
+* Memberikan pengalaman bermain yang cepat, interaktif, dan mudah dipahami.
+
+### Tujuan Bisnis / Produk
+
+* Menyediakan MVP game multiplayer casual berbasis web.
+* Mendukung mode bermain cepat untuk teman, komunitas, atau publik.
+* Menjadi fondasi untuk fitur lanjutan seperti ranking, skin token, custom board, dan turnamen.
+
+---
+
+## 3. Target Pengguna
+
+### Primary User
+
+* Pemain casual yang ingin bermain Monopoly online bersama teman.
+* Pengguna browser desktop atau mobile.
+* Pemain yang menyukai game cepat dan kompetitif.
+
+### Secondary User
+
+* Komunitas game kecil.
+* Streamer atau content creator yang ingin memainkan game ringan bersama penonton.
+* Pelajar/mahasiswa yang ingin bermain game multiplayer tanpa instalasi.
+
+---
+
+## 4. Platform
+
+### MVP Platform
+
+* Browser desktop.
+* Browser mobile responsif.
+
+### Browser Minimum
+
+* Chrome versi modern.
+* Firefox versi modern.
+* Edge versi modern.
+* Safari versi modern.
+
+---
+
+## 5. Konsep Gameplay
+
+### Konsep Dasar
+
+Game menggunakan papan Monopoly dengan petak properti, pajak, kesempatan, dana umum, penjara, start, dan petak khusus lainnya. Setiap pemain memiliki token, uang awal, dan posisi di papan.
+
+Perbedaan utama dari Monopoly klasik adalah tidak adanya sistem giliran. Semua pemain dapat melakukan lempar dadu secara mandiri ketika status pemain mengizinkan.
+
+### Prinsip Utama Free-Roll
+
+* Tidak ada urutan giliran pemain.
+* Setiap pemain memiliki tombol “Roll Dice”.
+* Pemain boleh melempar dadu jika tidak sedang dalam status terkunci.
+* Setelah melempar dadu, pemain masuk ke fase resolusi aksi.
+* Pemain harus menyelesaikan aksi pada petak tempat ia berhenti sebelum bisa melempar lagi.
+* Untuk mencegah spam, setiap pemain memiliki cooldown setelah menyelesaikan satu roll.
+
+---
+
+## 6. Mode Permainan
+
+### MVP Mode: Private Room 4 Player
+
+* Pemain dapat membuat room.
+* Sistem menghasilkan room code/link undangan.
+* Pemain lain dapat masuk menggunakan room code/link.
+* Game dapat dimulai ketika minimal 2 pemain sudah masuk.
+* Maksimal 4 pemain dalam satu room.
+* Host dapat memulai permainan.
+
+### Future Mode
+
+* Public matchmaking.
+* Ranked match.
+* Custom rule room.
+* Spectator mode.
+* AI bot player.
+
+---
+
+## 7. Aturan Pemain
+
+### Jumlah Pemain
+
+* Minimum: 2 pemain.
+* Maksimum: 4 pemain.
+
+### Data Pemain
+
+Setiap pemain memiliki:
+
+* Nama pemain.
+* Avatar/token.
+* Saldo uang.
+* Posisi papan.
+* Daftar properti.
+* Status aktif/tidak aktif.
+* Status koneksi.
+* Status aksi saat ini.
+
+### Status Pemain
+
+* `waiting`: menunggu game dimulai.
+* `ready`: siap bermain.
+* `rolling`: sedang melempar dadu.
+* `moving`: token sedang bergerak.
+* `resolving_tile`: sedang menyelesaikan aksi petak.
+* `cooldown`: menunggu cooldown sebelum bisa roll lagi.
+* `jailed`: berada di penjara.
+* `bankrupt`: bangkrut dan keluar dari permainan aktif.
+* `disconnected`: koneksi terputus.
+
+---
+
+## 8. Mekanisme Roll Dice Tanpa Giliran
+
+### Syarat Pemain Bisa Roll
+
+Pemain bisa menekan tombol Roll Dice jika:
+
+* Game sudah dimulai.
+* Pemain belum bangkrut.
+* Pemain tidak sedang bergerak.
+* Pemain tidak sedang menyelesaikan aksi tile.
+* Pemain tidak sedang cooldown.
+* Pemain tidak sedang dalam pop-up keputusan wajib.
+
+### Cooldown Roll
+
+Untuk menjaga keseimbangan permainan:
+
+* Setelah satu aksi selesai, pemain masuk cooldown.
+* Durasi cooldown MVP: 5 detik.
+* Cooldown dapat disesuaikan di masa depan.
+
+### Resolusi Roll
+
+Saat pemain menekan Roll Dice:
+
+1. Server menerima request roll.
+2. Server memvalidasi status pemain.
+3. Server menghasilkan angka dadu.
+4. Server mengirim hasil roll ke semua pemain.
+5. Token pemain bergerak di papan.
+6. Server menentukan petak tujuan.
+7. Server menjalankan efek petak.
+8. Pemain menyelesaikan aksi jika diperlukan.
+9. Pemain masuk cooldown.
+10. Setelah cooldown selesai, pemain bisa roll lagi.
+
+### Validasi Anti-Cheat
+
+* Hasil dadu harus dibuat oleh server, bukan client.
+* Client hanya mengirim request roll.
+* Server menentukan angka, posisi, efek tile, pembayaran, pembelian, dan status pemain.
+* Semua perubahan state game harus berasal dari server.
+
+---
+
+## 9. Tantangan Desain Karena Tidak Ada Giliran
+
+Karena semua pemain dapat bergerak tanpa giliran, beberapa aturan klasik Monopoly perlu disesuaikan.
+
+### Masalah 1: Banyak Pemain Berhenti di Properti yang Sama Secara Hampir Bersamaan
+
+Solusi:
+
+* Semua event diproses oleh server berdasarkan timestamp request yang valid.
+* Jika dua pemain mendarat di properti kosong hampir bersamaan, pemain yang event-nya diproses lebih dulu mendapat hak beli lebih dulu.
+* Pemain lain akan melihat status properti sudah berubah jika event pertama selesai lebih dulu.
+
+### Masalah 2: Pemain Terlalu Cepat Mengumpulkan Uang / Properti
+
+Solusi:
+
+* Terapkan cooldown roll.
+* Terapkan fase aksi wajib sebelum roll berikutnya.
+* Batasi waktu keputusan pembelian properti.
+
+### Masalah 3: Game Terlalu Kacau
+
+Solusi:
+
+* Gunakan animasi token yang jelas.
+* Gunakan event log real-time.
+* Gunakan notifikasi pembayaran/sewa.
+* Tampilkan status setiap pemain: rolling, moving, deciding, cooldown.
+
+### Masalah 4: Pemain Mengabaikan Keputusan Pembelian
+
+Solusi:
+
+* Setiap keputusan pembelian memiliki timer.
+* Jika timer habis, sistem otomatis memilih “Skip Buy”.
+* Untuk lelang, MVP dapat dinonaktifkan terlebih dahulu agar permainan lebih sederhana.
+
+---
+
+## 10. Board dan Tile
+
+### Jenis Tile MVP
+
+* Start / GO.
+* Property.
+* Railroad / Station.
+* Utility.
+* Tax.
+* Chance.
+* Community Chest.
+* Jail.
+* Go To Jail.
+* Free Parking.
+
+### Data Tile
+
+Setiap tile memiliki:
+
+* ID tile.
+* Nama tile.
+* Tipe tile.
+* Posisi index.
+* Harga beli.
+* Harga sewa.
+* Grup warna.
+* Owner.
+* Status mortgage.
+* Level bangunan, jika fitur rumah/hotel aktif.
+
+---
+
+## 11. Properti
+
+### Pembelian Properti
+
+Jika pemain berhenti di properti kosong:
+
+* Sistem menampilkan modal pembelian.
+* Pemain dapat memilih Buy atau Skip.
+* Timer keputusan MVP: 10 detik.
+* Jika timer habis, sistem otomatis Skip.
+
+### Membayar Sewa
+
+Jika pemain berhenti di properti milik pemain lain:
+
+* Server otomatis menghitung biaya sewa.
+* Server otomatis memindahkan uang dari pemain yang mendarat ke owner.
+* Jika saldo tidak cukup, pemain masuk proses bankruptcy.
+
+### Properti Milik Sendiri
+
+Jika pemain berhenti di properti miliknya sendiri:
+
+* Tidak ada pembayaran.
+* Pemain dapat lanjut ke cooldown.
+
+### Upgrade Properti
+
+Untuk MVP, upgrade rumah/hotel dapat dibuat sebagai fitur opsional.
+
+Rekomendasi MVP:
+
+* Tidak ada house/hotel dulu.
+* Fokus pada loop roll, beli, bayar sewa, dan bangkrut.
+
+Future:
+
+* Pemain dapat membeli rumah/hotel dari panel properti.
+* Upgrade dapat dilakukan kapan saja selama pemain tidak sedang menyelesaikan aksi wajib.
+
+---
+
+## 12. Sistem Uang
+
+### Uang Awal
+
+* Setiap pemain mulai dengan saldo default: 1500.
+
+### Sumber Uang
+
+* Melewati Start / GO.
+* Kartu Chance / Community Chest.
+* Menerima sewa dari pemain lain.
+
+### Pengeluaran Uang
+
+* Membeli properti.
+* Membayar sewa.
+* Membayar pajak.
+* Kartu Chance / Community Chest.
+* Biaya keluar penjara.
+
+---
+
+## 13. Penjara
+
+### Masuk Penjara
+
+Pemain masuk penjara jika:
+
+* Mendarat di tile Go To Jail.
+* Mendapat kartu yang mengirim ke jail.
+
+### Aturan Penjara MVP
+
+Karena tidak ada giliran, sistem penjara perlu berbasis waktu atau aksi.
+
+Rekomendasi MVP:
+
+* Pemain yang masuk jail tidak bisa roll selama 20 detik.
+* Pemain dapat membayar denda untuk keluar lebih cepat.
+* Setelah timer selesai, pemain otomatis keluar dari jail dan bisa roll lagi.
+
+### Future Rule
+
+* Menggunakan kartu Get Out of Jail.
+* Menggunakan sistem double dice.
+* Menggunakan mini challenge.
+
+---
+
+## 14. Chance dan Community Chest
+
+### MVP Card Effects
+
+Efek kartu sederhana:
+
+* Tambah uang.
+* Kurangi uang.
+* Pindah ke tile tertentu.
+* Masuk penjara.
+* Bayar ke setiap pemain.
+* Terima uang dari setiap pemain.
+
+### Resolusi Kartu
+
+* Server memilih kartu secara acak.
+* Efek kartu langsung dieksekusi oleh server.
+* Semua pemain melihat event log kartu.
+
+---
+
+## 15. Kondisi Menang dan Kalah
+
+### Kalah / Bankrupt
+
+Pemain dianggap bangkrut jika:
+
+* Saldo tidak cukup untuk membayar kewajiban.
+* Pemain tidak memiliki aset yang bisa digunakan untuk membayar.
+
+Untuk MVP sederhana:
+
+* Jika saldo menjadi negatif setelah pembayaran, pemain langsung bankrupt.
+* Semua properti milik pemain kembali ke bank.
+* Pemain tidak bisa roll lagi.
+
+### Menang
+
+Game berakhir jika:
+
+* Tersisa 1 pemain yang belum bangkrut.
+
+Alternatif mode cepat:
+
+* Game memiliki durasi maksimal, misalnya 20 menit.
+* Jika waktu habis, pemain dengan total net worth tertinggi menang.
+
+### Rekomendasi MVP
+
+Gunakan dua mode kemenangan:
+
+1. Last Player Standing.
+2. Timed Match 20 menit.
+
+---
+
+## 16. Real-Time Multiplayer
+
+### Teknologi Komunikasi
+
+Game membutuhkan koneksi real-time antara client dan server.
+
+Rekomendasi:
+
+* WebSocket.
+* Socket.IO jika menggunakan Node.js.
+
+### Event Real-Time MVP
+
+Client ke server:
+
+* `create_room`
+* `join_room`
+* `leave_room`
+* `player_ready`
+* `start_game`
+* `roll_dice`
+* `buy_property`
+* `skip_property`
+* `pay_jail_fee`
+* `send_chat_message`
+
+Server ke client:
+
+* `room_created`
+* `player_joined`
+* `player_left`
+* `game_started`
+* `dice_rolled`
+* `player_moved`
+* `tile_resolved`
+* `property_bought`
+* `rent_paid`
+* `player_bankrupt`
+* `game_ended`
+* `game_state_updated`
+* `error_message`
+
+---
+
+## 17. Game State
+
+### Server Authoritative State
+
+Server menyimpan state utama game, meliputi:
+
+* Room ID.
+* Daftar pemain.
+* Board state.
+* Properti dan owner.
+* Saldo pemain.
+* Posisi pemain.
+* Status pemain.
+* Timer game.
+* Event log.
+
+Client hanya menampilkan state dan mengirim aksi pemain.
+
+### Sinkronisasi State
+
+* Saat pemain masuk room, server mengirim full game state.
+* Saat ada aksi, server mengirim delta update.
+* Jika reconnect, client meminta full state terbaru.
+
+---
+
+## 18. Room System
+
+### Create Room
+
+User dapat membuat room dengan:
+
+* Nama pemain.
+* Avatar/token.
+* Mode game.
+* Durasi game jika timed match.
+
+Setelah room dibuat:
+
+* Sistem membuat room code unik.
+* Host masuk ke lobby.
+
+### Join Room
+
+User dapat masuk dengan:
+
+* Room code.
+* Nama pemain.
+* Avatar/token.
+
+Validasi:
+
+* Room harus tersedia.
+* Game belum dimulai, kecuali reconnect.
+* Slot pemain belum penuh.
+
+### Lobby
+
+Lobby menampilkan:
+
+* Room code.
+* Daftar pemain.
+* Status ready.
+* Tombol Start Game untuk host.
+* Pengaturan game dasar.
+
+---
+
+## 19. UI/UX Requirements
+
+### Halaman Utama
+
+* Tombol Create Room.
+* Tombol Join Room.
+* Input nama pemain.
+* Pilihan avatar/token.
+
+### Lobby Page
+
+* Room code.
+* Copy invite link.
+* Daftar pemain.
+* Status ready.
+* Tombol Start Game.
+
+### Game Page
+
+Elemen utama:
+
+* Board Monopoly.
+* Token pemain di atas board.
+* Panel pemain.
+* Saldo pemain.
+* Status pemain.
+* Tombol Roll Dice.
+* Cooldown indicator.
+* Modal aksi tile.
+* Event log.
+* Chat sederhana.
+
+### Roll Button State
+
+Tombol Roll Dice memiliki status:
+
+* Enabled: pemain bisa roll.
+* Disabled: pemain sedang moving/resolving/cooldown/jailed/bankrupt.
+* Loading: request roll sedang dikirim.
+
+### Event Log
+
+Contoh event log:
+
+* “Alya rolled 8.”
+* “Bima bought Surabaya Street for 200.”
+* “Citra paid rent 50 to Danu.”
+* “Danu went to Jail.”
+
+---
+
+## 20. Non-Functional Requirements
+
+### Performance
+
+* Game harus berjalan lancar di browser modern.
+* Latensi update real-time target di bawah 300ms untuk event normal.
+* Animasi token tidak boleh menghambat validasi server.
+
+### Scalability MVP
+
+* Mendukung banyak room aktif secara paralel.
+* Setiap room maksimal 4 pemain.
+* State game dapat disimpan di memory untuk MVP.
+
+### Reliability
+
+* Jika pemain disconnect, status berubah menjadi disconnected.
+* Pemain dapat reconnect ke room yang sama.
+* Jika pemain disconnect terlalu lama, sistem dapat mengeluarkan pemain atau membuatnya inactive.
+
+### Security
+
+* Semua aksi harus divalidasi server.
+* Client tidak boleh menentukan hasil dadu.
+* Client tidak boleh mengubah saldo/properti secara langsung.
+* Room code harus cukup sulit ditebak.
+
+---
+
+## 21. Reconnect dan Disconnect
+
+### Disconnect
+
+Jika pemain disconnect:
+
+* Server menandai pemain sebagai disconnected.
+* Token tetap berada di board.
+* Pemain tidak dapat roll.
+* Properti tetap dimiliki pemain.
+
+### Reconnect
+
+Jika pemain kembali:
+
+* Pemain masuk menggunakan session/token lama.
+* Server mengirim full game state terbaru.
+* Pemain dapat lanjut bermain jika belum bankrupt.
+
+### Timeout Disconnect
+
+Rekomendasi MVP:
+
+* Jika disconnect lebih dari 2 menit, pemain dianggap inactive.
+* Dalam mode MVP, inactive player bisa otomatis bankrupt atau tetap diam sampai game selesai.
+
+Rekomendasi: untuk MVP, gunakan status inactive dan jangan langsung bankrupt.
+
+---
+
+## 22. Admin / Debug Tools MVP
+
+Untuk membantu development:
+
+* Debug panel untuk melihat game state.
+* Tombol reset room.
+* Simulasi roll tertentu di environment development.
+* Log event server.
+
+---
+
+## 23. Analytics MVP
+
+Event yang perlu dicatat:
+
+* Room created.
+* Player joined.
+* Game started.
+* Dice rolled.
+* Property bought.
+* Rent paid.
+* Player bankrupt.
+* Game ended.
+* Player disconnected.
+* Player reconnected.
+
+Metric utama:
+
+* Jumlah room dibuat.
+* Jumlah game selesai.
+* Rata-rata durasi game.
+* Rata-rata jumlah roll per pemain.
+* Drop-off di lobby.
+* Disconnect rate.
+
+---
+
+## 24. MVP Scope
+
+### In Scope
+
+* Browser game.
+* Create room.
+* Join room dengan code/link.
+* Maksimal 4 pemain.
+* Real-time multiplayer.
+* Board Monopoly sederhana.
+* Roll dice tanpa giliran.
+* Cooldown roll.
+* Beli properti.
+* Bayar sewa otomatis.
+* Tile tax.
+* Tile chance/community chest sederhana.
+* Jail berbasis timer.
+* Sistem uang.
+* Bankruptcy sederhana.
+* Game end condition.
+* Event log.
+* Chat sederhana.
+* Reconnect dasar.
+
+### Out of Scope MVP
+
+* Login/register.
+* Ranking global.
+* AI bot.
+* House/hotel kompleks.
+* Mortgage.
+* Auction.
+* Trade antar pemain.
+* Skin marketplace.
+* Mobile app native.
+* Voice chat.
+* Spectator mode.
+
+---
+
+## 25. User Stories
+
+### Room
+
+* Sebagai pemain, saya ingin membuat room agar bisa bermain dengan teman.
+* Sebagai pemain, saya ingin membagikan room code agar teman bisa bergabung.
+* Sebagai pemain, saya ingin masuk room dengan kode agar bisa ikut bermain.
+
+### Gameplay
+
+* Sebagai pemain, saya ingin melempar dadu kapan saja saat tombol tersedia agar permainan terasa cepat.
+* Sebagai pemain, saya ingin melihat token saya bergerak di board setelah roll.
+* Sebagai pemain, saya ingin membeli properti kosong yang saya datangi.
+* Sebagai pemain, saya ingin otomatis membayar sewa jika berhenti di properti lawan.
+* Sebagai pemain, saya ingin melihat saldo dan properti semua pemain.
+
+### Real-Time
+
+* Sebagai pemain, saya ingin melihat aksi pemain lain secara real-time.
+* Sebagai pemain, saya ingin melihat event log agar paham apa yang sedang terjadi.
+* Sebagai pemain, saya ingin bisa reconnect jika koneksi terputus.
+
+### End Game
+
+* Sebagai pemain, saya ingin mengetahui siapa pemenang ketika game berakhir.
+* Sebagai pemain, saya ingin melihat ringkasan hasil game.
+
+---
+
+## 26. Acceptance Criteria MVP
+
+### Room
+
+* User bisa membuat room.
+* Sistem menghasilkan room code unik.
+* Maksimal 4 pemain bisa masuk room.
+* Host bisa memulai game jika minimal 2 pemain sudah masuk.
+
+### Roll Dice
+
+* Pemain bisa roll tanpa menunggu giliran.
+* Server menghasilkan angka dadu.
+* Pemain tidak bisa roll saat moving, resolving, cooldown, jailed, atau bankrupt.
+* Setelah aksi selesai, pemain masuk cooldown.
+
+### Movement
+
+* Token bergerak sesuai angka dadu.
+* Jika melewati Start/GO, pemain menerima uang.
+* Semua client melihat pergerakan pemain.
+
+### Property
+
+* Jika mendarat di properti kosong, pemain bisa membeli atau skip.
+* Jika timer pembelian habis, sistem otomatis skip.
+* Jika properti dibeli, owner berubah dan saldo berkurang.
+* Jika mendarat di properti lawan, sewa otomatis dibayar.
+
+### Game End
+
+* Pemain bankrupt tidak bisa roll lagi.
+* Game selesai jika hanya tersisa satu pemain aktif atau timer habis.
+* Sistem menampilkan pemenang.
+
+---
+
+## 27. Risiko Produk dan Mitigasi
+
+### Risiko: Permainan Terlalu Cepat dan Tidak Terkontrol
+
+Mitigasi:
+
+* Cooldown roll.
+* Wajib menyelesaikan aksi sebelum roll lagi.
+* Event log real-time.
+
+### Risiko: Konflik State Karena Banyak Aksi Bersamaan
+
+Mitigasi:
+
+* Server authoritative state.
+* Queue event per room.
+* Semua transaksi game diproses secara atomik.
+
+### Risiko: Pemain Bingung Karena Tidak Ada Giliran
+
+Mitigasi:
+
+* Status visual setiap pemain.
+* Cooldown indicator.
+* Highlight aksi penting.
+* Tutorial singkat sebelum game.
+
+### Risiko: Monopoly Klasik Tidak Cocok Tanpa Giliran
+
+Mitigasi:
+
+* MVP menggunakan rule sederhana.
+* Beberapa fitur klasik seperti auction, trade, mortgage ditunda.
+* Fokus pada fun loop cepat.
+
+---
+
+## 28. Rekomendasi Arsitektur Teknis
+
+### Frontend
+
+* React / Next.js.
+* Canvas atau SVG untuk board.
+* Zustand/Redux untuk client state.
+* Socket.IO client untuk real-time event.
+
+### Backend
+
+* Node.js.
+* Socket.IO server.
+* In-memory game state untuk MVP.
+* Redis untuk scale-out di fase berikutnya.
+* PostgreSQL/MySQL untuk persistence jika login/history ditambahkan.
+
+### Data Store MVP
+
+Untuk MVP awal:
+
+* Room state disimpan di memory server.
+* Tidak perlu database untuk game history.
+* Database hanya dibutuhkan jika ada akun, leaderboard, atau match history.
+
+---
+
+## 29. Data Model Awal
+
+### Player
+
+```json
+{
+  "id": "player_1",
+  "name": "Alya",
+  "avatar": "car",
+  "balance": 1500,
+  "position": 0,
+  "properties": [],
+  "status": "ready",
+  "isConnected": true,
+  "cooldownUntil": null
+}
+```
+
+### Room
+
+```json
+{
+  "id": "room_abc123",
+  "code": "ABCD",
+  "hostPlayerId": "player_1",
+  "status": "waiting",
+  "players": [],
+  "board": [],
+  "eventLog": [],
+  "createdAt": "2026-05-21T00:00:00Z"
+}
+```
+
+### Tile
+
+```json
+{
+  "id": "tile_1",
+  "index": 1,
+  "name": "Jakarta Street",
+  "type": "property",
+  "price": 100,
+  "rent": 10,
+  "ownerPlayerId": null,
+  "colorGroup": "brown"
+}
+```
+
+---
+
+## 30. Open Questions
+
+* Apakah game harus memakai nama kota/properti original atau versi custom agar aman dari isu lisensi?
+* Apakah board mengikuti 40 petak Monopoly klasik atau dibuat lebih kecil untuk mode cepat?
+* Apakah cooldown 5 detik cukup seimbang?
+* Apakah mode utama MVP sebaiknya last player standing atau timed match?
+* Apakah trade, auction, dan mortgage akan dimasukkan setelah MVP?
+* Apakah pemain bisa melakukan upgrade properti kapan saja atau hanya pada fase tertentu?
+
+---
+
+## 31. Rekomendasi Keputusan Awal
+
+Untuk MVP pertama, disarankan:
+
+* Gunakan board custom, bukan aset Monopoly resmi.
+* Gunakan 28–32 tile agar game lebih cepat.
+* Gunakan maksimal 4 pemain.
+* Gunakan cooldown roll 5 detik.
+* Gunakan durasi match 20 menit sebagai mode default.
+* Hilangkan auction, mortgage, trade, house, dan hotel di versi pertama.
+* Fokus pada loop utama: roll, bergerak, beli properti, bayar sewa, bangkrut, menang.
+
+---
+
+## 32. Definisi MVP Sukses
+
+MVP dianggap berhasil jika:
+
+* 4 pemain bisa masuk satu room dan bermain bersamaan.
+* Setiap pemain bisa roll tanpa giliran dengan validasi server.
+* State game tetap konsisten meskipun aksi terjadi hampir bersamaan.
+* Pemain bisa membeli properti dan membayar sewa.
+* Game bisa berakhir dengan pemenang yang jelas.
+* Tidak ada cara mudah bagi client untuk memanipulasi dadu, uang, atau properti.

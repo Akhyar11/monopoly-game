@@ -1,0 +1,10 @@
+node_modules/
+bin/backend-linux
+bin/backend-win.exe
+frontend/dist/
+backend/dist/
+backend/public/
+backend/uploads/
+.env
+bin/.env
+*.zip

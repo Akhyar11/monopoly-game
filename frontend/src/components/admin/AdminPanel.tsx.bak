@@ -1,0 +1,1934 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Activity,
+  BarChart3,
+  Bell,
+  Flag,
+  LayoutDashboard,
+  Lock,
+  Radio,
+  ScrollText,
+  Settings2,
+  Shield,
+  Users,
+  Image as ImageIcon,
+} from 'lucide-react';
+
+type AdminRoute = '/admin' | '/admin/rooms' | '/admin/players' | '/admin/economy' | '/admin/board' | '/admin/skins' | '/admin/audit-logs' | '/admin/analytics';
+type NoticeTone = 'info' | 'success' | 'warning';
+
+type NavItem = {
+  label: string;
+  path: AdminRoute;
+  icon: React.ComponentType<{ className?: string }>;
+  description: string;
+};
+
+type DashboardSummary = {
+  activeRooms: number;
+  liveMatches: number;
+  endedMatchesToday: number;
+  onlinePlayers: number;
+  debtCases: number;
+  activeTrades: number;
+  activeAuctions: number;
+  averageMatchDurationMs: number;
+};
+
+type RoomSummary = {
+  code: string;
+  status: string;
+  hostPlayerId: string;
+  hostName: string;
+  playerCount: number;
+  createdAt: number;
+  gameStartedAt: number | null;
+  activeTrades: number;
+  hasAuction: boolean;
+  debtCases: number;
+  bankruptPlayers: number;
+};
+
+type PlayerSummary = {
+  id: string;
+  name: string;
+  avatar: string;
+  roomCode: string;
+  balance: number;
+  status: string;
+  isConnected: boolean;
+  properties: number;
+  debtDeadline: number | null;
+};
+
+type PlayerDetail = PlayerSummary & {
+  position: number;
+  cooldownUntil?: number | null;
+  rollsLeft?: number;
+  ownedTiles: Array<{ id: string; name?: string; isMortgaged?: boolean; buildingLevel?: number }>;
+  recentEvents: string[];
+};
+
+type RoomPlayer = {
+  id: string;
+  name: string;
+  avatar: string;
+  balance: number;
+  properties: string[];
+  status: string;
+  isConnected: boolean;
+  debtDeadline?: number | null;
+};
+
+type RoomDetail = RoomSummary & {
+  hostPlayer: RoomPlayer | null;
+  players: RoomPlayer[];
+  board: Array<{ id: string; ownerPlayerId?: string | null }>;
+  eventLog: string[];
+  auction: { tileId: string; currentBid: number; highestBidderId: string | null } | null;
+  tradeOffers: Array<{ id: string; fromPlayerId: string; toPlayerId: string; expiresAt: number }>;
+};
+
+type AuditLog = {
+  id: string;
+  timestamp: number;
+  adminId: string;
+  role: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  before: unknown;
+  after: unknown;
+};
+
+type Notice = {
+  id: string;
+  tone: NoticeTone;
+  message: string;
+};
+
+type AdminUser = {
+  username: string;
+  role: string;
+  displayName: string;
+};
+
+type GameConfigValue = {
+  initialBalance: number;
+  passGoReward: number;
+  cooldownMs: number;
+  propertyDecisionMs: number;
+  debtDecisionMs: number;
+  tradeExpiryMs: number;
+  jailFee: number;
+  featureFlags: {
+    auction: boolean;
+    trade: boolean;
+    mortgage: boolean;
+    housesHotels: boolean;
+  };
+};
+
+type GameConfigResponse = {
+  key: string;
+  value: GameConfigValue;
+  updatedBy: string;
+  updatedAt: number;
+};
+
+type BoardTile = {
+  id: string;
+  index: number;
+  name: string;
+  type: 'go' | 'property' | 'railroad' | 'utility' | 'tax' | 'chance' | 'chest' | 'jail' | 'gotojail' | 'parking';
+  price?: number;
+  rent?: number;
+  ownerPlayerId?: string | null;
+  colorGroup?: string;
+  taxAmount?: number;
+  houseCost?: number;
+  buildingLevel?: number;
+  isMortgaged?: boolean;
+};
+
+type PublishedBoardResponse = {
+  id: number;
+  versionName: string;
+  board: BoardTile[];
+  createdBy: string;
+  createdAt: number;
+  publishedAt: number | null;
+};
+
+type BoardVersionSummary = {
+  id: number;
+  versionName: string;
+  createdBy: string;
+  createdAt: number;
+  publishedAt: number | null;
+};
+
+type BoardSkin = {
+  id: number;
+  name: string;
+  type: 'image' | 'color';
+  value: string;
+  createdBy: string;
+  createdAt: number;
+};
+
+const ADMIN_API_URL = 'http://localhost:3001';
+const ADMIN_STORAGE_KEY = 'monopoly_admin_token';
+
+const navItems: NavItem[] = [
+  { label: 'Dashboard', path: '/admin', icon: LayoutDashboard, description: 'Operational overview' },
+  { label: 'Rooms', path: '/admin/rooms', icon: Activity, description: 'Live room monitor' },
+  { label: 'Players', path: '/admin/players', icon: Users, description: 'Player control surface' },
+  { label: 'Economy', path: '/admin/economy', icon: Settings2, description: 'Global game config' },
+  { label: 'Board', path: '/admin/board', icon: Flag, description: 'Board and tile editor' },
+  { label: 'Skins', path: '/admin/skins', icon: ImageIcon, description: 'Board skins' },
+  { label: 'Audit Logs', path: '/admin/audit-logs', icon: ScrollText, description: 'Admin action trail' },
+  { label: 'Analytics', path: '/admin/analytics', icon: BarChart3, description: 'Economy and match metrics' },
+];
+
+const routeTitle: Record<AdminRoute, { title: string; subtitle: string }> = {
+  '/admin': { title: 'Operations Dashboard', subtitle: 'Live operational view across rooms, players, and economy.' },
+  '/admin/rooms': { title: 'Room Monitor', subtitle: 'Inspect active rooms and intervene without entering the game client.' },
+  '/admin/players': { title: 'Player Control', subtitle: 'Search players, inspect status, and prepare moderation actions.' },
+  '/admin/economy': { title: 'Economy Control', subtitle: 'Tune global pacing, debt pressure, and feature toggles.' },
+  '/admin/board': { title: 'Board Editor', subtitle: 'Manage tile definitions, rent values, and board publishing flow.' },
+  '/admin/skins': { title: 'Board Skins', subtitle: 'Manage visual skins that can be mapped to the board.' },
+  '/admin/audit-logs': { title: 'Audit Log', subtitle: 'Every admin intervention should be visible and traceable here.' },
+  '/admin/analytics': { title: 'Analytics', subtitle: 'Use economy and match metrics to guide balancing decisions.' },
+};
+
+const toAdminRoute = (pathname: string): AdminRoute => {
+  const matched = navItems.find((item) => pathname === item.path);
+  return matched?.path ?? '/admin';
+};
+
+const navigate = (path: AdminRoute, setPath: (path: AdminRoute) => void) => {
+  window.history.pushState({}, '', path);
+  setPath(path);
+};
+
+const statusTone = (status: string) => {
+  if (status === 'playing' || status === 'ready' || status === 'waiting') return 'text-emerald-300 bg-emerald-500/15 border-emerald-500/25';
+  if (status === 'in_debt' || status === 'auction') return 'text-amber-200 bg-amber-500/15 border-amber-500/25';
+  if (status === 'bankrupt' || status === 'ended') return 'text-rose-200 bg-rose-500/15 border-rose-500/25';
+  return 'text-cyan-200 bg-cyan-500/15 border-cyan-500/25';
+};
+
+const formatCountdown = (timestamp?: number | null) => {
+  if (!timestamp) return '-';
+  return `${Math.max(0, Math.ceil((timestamp - Date.now()) / 1000))}s`;
+};
+
+const formatDateTime = (timestamp?: number | null) => {
+  if (!timestamp) return '-';
+  return new Date(timestamp).toLocaleString();
+};
+
+const formatDuration = (ms: number) => {
+  if (!ms) return '0m';
+  const minutes = Math.floor(ms / 60000);
+  const seconds = Math.floor((ms % 60000) / 1000);
+  return `${minutes}m ${seconds}s`;
+};
+
+const formatJsonValue = (value: unknown, depth = 0): string => {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number') return value.toString();
+  if (typeof value === 'string') return `"${value}"`;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '[]';
+    const items = value.map((item) => formatJsonValue(item, depth + 1));
+    if (depth > 2 || items.join(', ').length > 60) {
+      return `[\n  ${items.join(',\n  ')}\n]`;
+    }
+    return `[${items.join(', ')}]`;
+  }
+  if (typeof value === 'object') {
+    const keys = Object.keys(value as Record<string, unknown>);
+    if (keys.length === 0) return '{}';
+    const items = keys.map((key) => `"${key}": ${formatJsonValue((value as Record<string, unknown>)[key], depth + 1)}`);
+    if (depth > 2 || items.join(', ').length > 60) {
+      return `{\n  ${items.join(',\n  ')}\n}`;
+    }
+    return `{${items.join(', ')}}`;
+  }
+  return String(value);
+};
+
+const getChangedFields = (before: unknown, after: unknown): Array<{key: string; from: unknown; to: unknown}> => {
+  if (typeof before !== 'object' || before === null || typeof after !== 'object' || after === null) {
+    return [];
+  }
+  
+  const beforeObj = before as Record<string, unknown>;
+  const afterObj = after as Record<string, unknown>;
+  const allKeys = new Set([...Object.keys(beforeObj), ...Object.keys(afterObj)]);
+  const changes: Array<{key: string; from: unknown; to: unknown}> = [];
+  
+  for (const key of allKeys) {
+    const beforeVal = beforeObj[key];
+    const afterVal = afterObj[key];
+    
+    if (JSON.stringify(beforeVal) !== JSON.stringify(afterVal)) {
+      changes.push({ key, from: beforeVal, to: afterVal });
+    }
+  }
+  
+  return changes;
+};
+
+const roleRank: Record<string, number> = {
+  analyst: 0,
+  support: 1,
+  game_master: 2,
+  super_admin: 3,
+};
+
+const hasAdminRole = (role: string | undefined, minimumRole: keyof typeof roleRank) => {
+  if (!role) return false;
+  return (roleRank[role] ?? -1) >= roleRank[minimumRole];
+};
+
+const fetchAdmin = async <T,>(path: string, token: string, init?: RequestInit): Promise<T> => {
+  const response = await fetch(`${ADMIN_API_URL}${path}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      ...(init?.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({ message: 'Request failed' }));
+    throw new Error(payload.message || 'Request failed');
+  }
+
+  return response.json() as Promise<T>;
+};
+
+export const AdminPanel: React.FC = () => {
+  const [path, setPath] = useState<AdminRoute>(toAdminRoute(window.location.pathname));
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem(ADMIN_STORAGE_KEY));
+  const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
+  const [loginForm, setLoginForm] = useState({ username: 'admin', password: 'admin123' });
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [authChecking, setAuthChecking] = useState(!!localStorage.getItem(ADMIN_STORAGE_KEY));
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [rooms, setRooms] = useState<RoomSummary[]>([]);
+  const [players, setPlayers] = useState<PlayerSummary[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
+  const [selectedPlayer, setSelectedPlayer] = useState<PlayerDetail | null>(null);
+  const [selectedRoomCode, setSelectedRoomCode] = useState<string | null>(null);
+  const [selectedRoom, setSelectedRoom] = useState<RoomDetail | null>(null);
+  const [notices, setNotices] = useState<Notice[]>([]);
+  const [configData, setConfigData] = useState<GameConfigResponse | null>(null);
+  const [configDraft, setConfigDraft] = useState<GameConfigValue | null>(null);
+  const [boardData, setBoardData] = useState<PublishedBoardResponse | null>(null);
+  const [boardVersions, setBoardVersions] = useState<BoardVersionSummary[]>([]);
+  const [boardSkins, setBoardSkins] = useState<BoardSkin[]>([]);
+  const [newSkin, setNewSkin] = useState({ name: '', type: 'image' as 'image' | 'color', value: '' });
+  const [selectedBoardTileId, setSelectedBoardTileId] = useState<string | null>(null);
+  const [boardVersionName, setBoardVersionName] = useState('');
+  const [draggedTileIndex, setDraggedTileIndex] = useState<number | null>(null);
+  const [expandedAuditLogIds, setExpandedAuditLogIds] = useState<Set<string>>(new Set());
+  const canKickPlayers = hasAdminRole(adminUser?.role, 'support');
+  const canManageRooms = hasAdminRole(adminUser?.role, 'game_master');
+  const canManageCooldowns = hasAdminRole(adminUser?.role, 'game_master');
+  const canManageBalances = hasAdminRole(adminUser?.role, 'super_admin');
+
+  useEffect(() => {
+    const onPopState = () => setPath(toAdminRoute(window.location.pathname));
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const selectedRoomSummary = useMemo(
+    () => rooms.find((room) => room.code === selectedRoomCode) ?? rooms[0] ?? null,
+    [rooms, selectedRoomCode],
+  );
+
+  useEffect(() => {
+    if (!selectedPlayerId && players.length > 0) {
+      setSelectedPlayerId(players[0].id);
+    }
+  }, [players, selectedPlayerId]);
+
+  useEffect(() => {
+    if (!selectedRoomCode && rooms.length > 0) {
+      setSelectedRoomCode(rooms[0].code);
+    }
+  }, [rooms, selectedRoomCode]);
+
+  useEffect(() => {
+    if (!selectedBoardTileId && boardData && boardData.board.length > 0) {
+      setSelectedBoardTileId(boardData.board[0].id);
+    }
+  }, [boardData, selectedBoardTileId]);
+
+  useEffect(() => {
+    if (!token) {
+      setAuthChecking(false);
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const bootstrap = async () => {
+      try {
+        const data = await fetchAdmin<{ user: AdminUser }>('/admin/auth/me', token);
+        if (!cancelled) {
+          setAdminUser(data.user);
+          setAuthChecking(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setToken(null);
+          setAdminUser(null);
+          setAuthChecking(false);
+          localStorage.removeItem(ADMIN_STORAGE_KEY);
+        }
+      }
+    };
+
+    bootstrap();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+
+    let cancelled = false;
+
+    const load = async (isInitial = false) => {
+      if (isInitial) setLoading(true);
+      setError(null);
+      try {
+        const [dashboardData, roomData, playerData, auditData] = await Promise.all([
+          fetchAdmin<DashboardSummary>('/admin/dashboard/summary', token),
+          fetchAdmin<RoomSummary[]>('/admin/rooms', token),
+          fetchAdmin<PlayerSummary[]>('/admin/players', token),
+          fetchAdmin<AuditLog[]>('/admin/audit-logs', token),
+        ]);
+
+        if (cancelled) return;
+        setSummary(dashboardData);
+        setRooms(roomData);
+        setPlayers(playerData);
+        setAuditLogs(auditData);
+      } catch (loadError) {
+        if (cancelled) return;
+        const message = loadError instanceof Error ? loadError.message : 'Failed to load admin data';
+        setError(message);
+        if (message.toLowerCase().includes('unauthorized')) {
+          setToken(null);
+          setAdminUser(null);
+          localStorage.removeItem(ADMIN_STORAGE_KEY);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    load(true);
+    const interval = window.setInterval(() => load(false), 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [token]);
+
+  useEffect(() => {
+    if (!selectedRoomSummary || !token) {
+      setSelectedRoom(null);
+      return;
+    }
+
+    let cancelled = false;
+    const loadRoom = async () => {
+      try {
+        const roomData = await fetchAdmin<RoomDetail>(`/admin/rooms/${selectedRoomSummary.code}`, token);
+        if (!cancelled) setSelectedRoom(roomData);
+      } catch (loadError) {
+        if (!cancelled) {
+          setSelectedRoom(null);
+          setError(loadError instanceof Error ? loadError.message : 'Failed to load room detail');
+        }
+      }
+    };
+
+    loadRoom();
+    const interval = window.setInterval(loadRoom, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [selectedRoomSummary, token]);
+
+  useEffect(() => {
+    if (!selectedPlayerId || !token) {
+      setSelectedPlayer(null);
+      return;
+    }
+
+    let cancelled = false;
+    const loadPlayer = async () => {
+      try {
+        const playerData = await fetchAdmin<PlayerDetail>(`/admin/players/${selectedPlayerId}`, token);
+        if (!cancelled) setSelectedPlayer(playerData);
+      } catch (loadError) {
+        if (!cancelled) {
+          setSelectedPlayer(null);
+          setError(loadError instanceof Error ? loadError.message : 'Failed to load player detail');
+        }
+      }
+    };
+
+    loadPlayer();
+    const interval = window.setInterval(loadPlayer, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [selectedPlayerId, token]);
+
+  useEffect(() => {
+    if (!token || path !== '/admin/economy') return;
+
+    let cancelled = false;
+    const loadConfig = async () => {
+      try {
+        const data = await fetchAdmin<GameConfigResponse>('/admin/config', token);
+        if (cancelled) return;
+        setConfigData(data);
+        setConfigDraft(data.value);
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : 'Failed to load config');
+        }
+      }
+    };
+
+    void loadConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, [path, token]);
+
+  useEffect(() => {
+    if (!token || path !== '/admin/board') return;
+
+    let cancelled = false;
+    const loadBoard = async () => {
+      try {
+        const [publishedBoard, versions] = await Promise.all([
+          fetchAdmin<PublishedBoardResponse>('/admin/board', token),
+          fetchAdmin<BoardVersionSummary[]>('/admin/board/versions', token),
+        ]);
+        if (cancelled) return;
+        setBoardData(publishedBoard);
+        setBoardVersions(versions);
+        setBoardVersionName(`${publishedBoard.versionName}-copy`);
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : 'Failed to load board');
+        }
+      }
+    };
+
+    void loadBoard();
+    return () => {
+      cancelled = true;
+    };
+  }, [path, token]);
+
+  useEffect(() => {
+    if (!token || path !== '/admin/skins') return;
+
+    let cancelled = false;
+    const loadSkins = async () => {
+      try {
+        const skins = await fetchAdmin<BoardSkin[]>('/admin/skins', token);
+        if (cancelled) return;
+        setBoardSkins(skins);
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : 'Failed to load skins');
+        }
+      }
+    };
+
+    void loadSkins();
+    return () => {
+      cancelled = true;
+    };
+  }, [path, token]);
+
+  const pageMeta = routeTitle[path];
+  const selectedBoardTile = boardData?.board.find((tile) => tile.id === selectedBoardTileId) ?? null;
+
+  const pushNotice = (message: string, tone: NoticeTone) => {
+    setNotices((items) => [...items, { id: `${Date.now()}_${Math.random()}`, message, tone }].slice(-4));
+  };
+
+  const removeNotice = (id: string) => {
+    setNotices((items) => items.filter((item) => item.id !== id));
+  };
+
+  const refreshAuditLogs = async () => {
+    if (!token) return;
+    const data = await fetchAdmin<AuditLog[]>('/admin/audit-logs', token);
+    setAuditLogs(data);
+  };
+
+  const refreshRooms = async () => {
+    if (!token) return;
+    const [roomData, dashboardData] = await Promise.all([
+      fetchAdmin<RoomSummary[]>('/admin/rooms', token),
+      fetchAdmin<DashboardSummary>('/admin/dashboard/summary', token),
+    ]);
+    setRooms(roomData);
+    setSummary(dashboardData);
+  };
+
+  const refreshPlayers = async () => {
+    if (!token) return;
+    const data = await fetchAdmin<PlayerSummary[]>('/admin/players', token);
+    setPlayers(data);
+  };
+
+  const refreshConfig = async () => {
+    if (!token) return;
+    const data = await fetchAdmin<GameConfigResponse>('/admin/config', token);
+    setConfigData(data);
+    setConfigDraft(data.value);
+  };
+
+  const refreshBoard = async () => {
+    if (!token) return;
+    const [publishedBoard, versions] = await Promise.all([
+      fetchAdmin<PublishedBoardResponse>('/admin/board', token),
+      fetchAdmin<BoardVersionSummary[]>('/admin/board/versions', token),
+    ]);
+    setBoardData(publishedBoard);
+    setBoardVersions(versions);
+    setBoardVersionName(`${publishedBoard.versionName}-copy`);
+  };
+
+  const refreshSkins = async () => {
+    if (!token) return;
+    const skins = await fetchAdmin<BoardSkin[]>('/admin/skins', token);
+    setBoardSkins(skins);
+  };
+
+  const handleCreateSkin = async () => {
+    if (!token || !newSkin.name || !newSkin.value) return;
+    try {
+      await fetchAdmin('/admin/skins', token, {
+        method: 'POST',
+        body: JSON.stringify(newSkin),
+      });
+      pushNotice('Board skin created successfully', 'success');
+      setNewSkin({ name: '', type: 'image', value: '' });
+      await refreshSkins();
+    } catch (e) {
+      pushNotice(e instanceof Error ? e.message : 'Failed to create skin', 'warning');
+    }
+  };
+
+  const handleDeleteSkin = async (id: number) => {
+    if (!token) return;
+    if (!window.confirm('Are you sure you want to delete this skin?')) return;
+    try {
+      await fetchAdmin(`/admin/skins/${id}`, token, { method: 'DELETE' });
+      pushNotice('Skin deleted', 'info');
+      await refreshSkins();
+    } catch (e) {
+      pushNotice(e instanceof Error ? e.message : 'Failed to delete skin', 'warning');
+    }
+  };
+
+  const handleBroadcast = async () => {
+    if (!selectedRoomSummary) return;
+    const message = window.prompt(`Broadcast message to room ${selectedRoomSummary.code}:`);
+    if (!message?.trim()) return;
+
+    try {
+      if (!token) return;
+      await fetchAdmin(`/admin/rooms/${selectedRoomSummary.code}/broadcast`, token, {
+        method: 'POST',
+        body: JSON.stringify({ message }),
+      });
+      await Promise.all([refreshRooms(), refreshPlayers(), refreshAuditLogs()]);
+      pushNotice(`Broadcast sent to ${selectedRoomSummary.code}.`, 'success');
+    } catch (actionError) {
+      pushNotice(actionError instanceof Error ? actionError.message : 'Broadcast failed', 'warning');
+    }
+  };
+
+  const handleForceEnd = async () => {
+    if (!selectedRoomSummary) return;
+    const confirmed = window.confirm(`Force end room ${selectedRoomSummary.code}?`);
+    if (!confirmed) return;
+
+    try {
+      if (!token) return;
+      await fetchAdmin(`/admin/rooms/${selectedRoomSummary.code}/end`, token, {
+        method: 'POST',
+        body: JSON.stringify({ reason: 'Force ended from admin panel' }),
+      });
+      await Promise.all([refreshRooms(), refreshPlayers(), refreshAuditLogs()]);
+      pushNotice(`Room ${selectedRoomSummary.code} ended.`, 'success');
+    } catch (actionError) {
+      pushNotice(actionError instanceof Error ? actionError.message : 'End room failed', 'warning');
+    }
+  };
+
+  const runPlayerAction = async (action: 'balance' | 'release-jail' | 'reset-cooldown' | 'bankrupt' | 'kick') => {
+    if (!selectedPlayer) return;
+
+    try {
+      if (!token) return;
+      if (action === 'balance') {
+        const nextBalance = window.prompt(`Set balance for ${selectedPlayer.name}:`, String(selectedPlayer.balance));
+        if (nextBalance === null) return;
+        await fetchAdmin(`/admin/players/${selectedPlayer.id}/balance`, token, {
+          method: 'POST',
+          body: JSON.stringify({ balance: Number(nextBalance) }),
+        });
+      } else {
+        const confirmed = window.confirm(`Run "${action}" for ${selectedPlayer.name}?`);
+        if (!confirmed) return;
+        await fetchAdmin(`/admin/players/${selectedPlayer.id}/${action}`, token, { method: 'POST' });
+      }
+
+      await Promise.all([refreshPlayers(), refreshRooms(), refreshAuditLogs()]);
+      const refreshed = await fetchAdmin<PlayerDetail>(`/admin/players/${selectedPlayer.id}`, token);
+      setSelectedPlayer(refreshed);
+      pushNotice(`Action "${action}" applied to ${selectedPlayer.name}.`, 'success');
+    } catch (actionError) {
+      pushNotice(actionError instanceof Error ? actionError.message : 'Player action failed', 'warning');
+    }
+  };
+
+  const updateConfigNumber = (field: keyof Omit<GameConfigValue, 'featureFlags'>, value: string) => {
+    setConfigDraft((current) => (current ? { ...current, [field]: Number(value) } : current));
+  };
+
+  const updateConfigFlag = (field: keyof GameConfigValue['featureFlags'], value: boolean) => {
+    setConfigDraft((current) =>
+      current
+        ? {
+            ...current,
+            featureFlags: {
+              ...current.featureFlags,
+              [field]: value,
+            },
+          }
+        : current,
+    );
+  };
+
+  const handleSaveConfig = async () => {
+    if (!token || !configDraft) return;
+
+    try {
+      await fetchAdmin('/admin/config', token, {
+        method: 'PUT',
+        body: JSON.stringify(configDraft),
+      });
+      await Promise.all([refreshConfig(), refreshAuditLogs()]);
+      pushNotice('Game config updated in MySQL.', 'success');
+    } catch (actionError) {
+      pushNotice(actionError instanceof Error ? actionError.message : 'Config update failed', 'warning');
+    }
+  };
+
+  const updateBoardTile = (field: keyof BoardTile, rawValue: string | boolean) => {
+    setBoardData((current) => {
+      if (!current || !selectedBoardTileId) return current;
+      return {
+        ...current,
+        board: current.board.map((tile) => {
+          if (tile.id !== selectedBoardTileId) return tile;
+
+          const nextTile = { ...tile };
+          if (typeof rawValue === 'boolean') {
+            (nextTile as Record<string, unknown>)[field] = rawValue;
+            return nextTile;
+          }
+
+          if (['index', 'price', 'rent', 'taxAmount', 'houseCost', 'buildingLevel'].includes(String(field))) {
+            const trimmed = rawValue.trim();
+            if (trimmed === '') {
+              delete (nextTile as Record<string, unknown>)[field];
+            } else {
+              (nextTile as Record<string, unknown>)[field] = Number(trimmed);
+            }
+            return nextTile;
+          }
+
+          if (field === 'ownerPlayerId') {
+            nextTile.ownerPlayerId = rawValue.trim() ? rawValue : null;
+            return nextTile;
+          }
+
+          (nextTile as Record<string, unknown>)[field] = rawValue;
+          return nextTile;
+        }),
+      };
+    });
+  };
+
+  const handleAddTile = () => {
+    setBoardData((current) => {
+      if (!current) return current;
+      const newTile: BoardTile = {
+        id: `t${Date.now()}`,
+        index: current.board.length,
+        name: 'New Tile',
+        type: 'property',
+        price: 100,
+        rent: 10,
+        colorGroup: 'gray',
+        houseCost: 50,
+      };
+      return { ...current, board: [...current.board, newTile] };
+    });
+  };
+
+  const handleRemoveTile = (tileId: string) => {
+    setBoardData((current) => {
+      if (!current) return current;
+      const newBoard = current.board.filter(t => t.id !== tileId).map((t, idx) => ({ ...t, index: idx }));
+      return { ...current, board: newBoard };
+    });
+    if (selectedBoardTileId === tileId) setSelectedBoardTileId(null);
+  };
+
+  const handleLoadVersion = async (versionId: number) => {
+    if (!token) return;
+    try {
+      const version = await fetchAdmin<PublishedBoardResponse>(`/admin/board/versions/${versionId}`, token);
+      setBoardData(version);
+      setBoardVersionName(version.versionName + ' (copy)');
+      pushNotice(`Loaded version: ${version.versionName}`, 'success');
+    } catch (actionError) {
+      pushNotice(actionError instanceof Error ? actionError.message : 'Failed to load version', 'warning');
+    }
+  };
+
+  const handleResetBoardDraft = () => {
+    void refreshBoard().then(() => pushNotice('Board draft reset to published version.', 'info')).catch((actionError) => {
+      pushNotice(actionError instanceof Error ? actionError.message : 'Board reset failed', 'warning');
+    });
+  };
+
+  const handleClearBoard = () => {
+    if (!canManageBalances) return;
+    setBoardData((current) => {
+      if (!current) return current;
+      return { ...current, board: [] };
+    });
+    setBoardVersionName('New Custom Board');
+    setSelectedBoardTileId(null);
+    pushNotice('Board cleared to 0 tiles.', 'info');
+  };
+
+  const handleDragStart = (index: number) => {
+    if (!canManageBalances) return;
+    setDraggedTileIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!canManageBalances) return;
+    e.preventDefault();
+  };
+
+  const handleDrop = (targetIndex: number) => {
+    if (!canManageBalances || draggedTileIndex === null || draggedTileIndex === targetIndex) return;
+    
+    setBoardData((current) => {
+      if (!current) return current;
+      const newBoard = [...current.board];
+      const [draggedTile] = newBoard.splice(draggedTileIndex, 1);
+      newBoard.splice(targetIndex, 0, draggedTile);
+      const updatedBoard = newBoard.map((t, idx) => ({ ...t, index: idx }));
+      return { ...current, board: updatedBoard };
+    });
+    setDraggedTileIndex(null);
+  };
+
+  const getTileGridStyle = (index: number, totalTiles: number) => {
+    const tilesPerSide = Math.ceil(totalTiles / 4);
+    const side = Math.floor(index / tilesPerSide);
+    const posOnSide = index % tilesPerSide;
+    const size = tilesPerSide + 1;
+    let row = 1, col = 1;
+    if (side === 0) { row = size; col = size - posOnSide; }
+    else if (side === 1) { row = size - posOnSide; col = 1; }
+    else if (side === 2) { row = 1; col = 1 + posOnSide; }
+    else if (side === 3) { row = 1 + posOnSide; col = size; }
+    return { gridRow: row, gridColumn: col };
+  };
+
+  const handlePublishBoard = async () => {
+    if (!token || !boardData) return;
+    const versionName = boardVersionName.trim();
+    if (!versionName) {
+      pushNotice('Version name is required before publishing.', 'warning');
+      return;
+    }
+
+    try {
+      await fetchAdmin('/admin/board/publish', token, {
+        method: 'POST',
+        body: JSON.stringify({ versionName, board: boardData.board }),
+      });
+      await Promise.all([refreshBoard(), refreshAuditLogs()]);
+      pushNotice(`Board version "${versionName}" published to MySQL.`, 'success');
+    } catch (actionError) {
+      pushNotice(actionError instanceof Error ? actionError.message : 'Board publish failed', 'warning');
+    }
+  };
+
+  const handleLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoginLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${ADMIN_API_URL}/admin/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(loginForm),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.message || 'Login failed');
+      }
+
+      localStorage.setItem(ADMIN_STORAGE_KEY, payload.token);
+      setToken(payload.token);
+      setAdminUser(payload.user);
+      setAuthChecking(false);
+      pushNotice(`Logged in as ${payload.user.displayName}.`, 'success');
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : 'Login failed');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      if (token) {
+        await fetchAdmin('/admin/auth/logout', token, { method: 'POST' });
+      }
+    } catch {
+      // ignore logout errors
+    } finally {
+      localStorage.removeItem(ADMIN_STORAGE_KEY);
+      setToken(null);
+      setAdminUser(null);
+      setAuthChecking(false);
+      setSummary(null);
+      setRooms([]);
+      setPlayers([]);
+      setAuditLogs([]);
+      setSelectedRoom(null);
+      setSelectedPlayer(null);
+    }
+  };
+
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#123047_0%,#08111f_52%,#020617_100%)] p-4 text-slate-100">
+        <div className="mx-auto flex min-h-screen max-w-md items-center justify-center">
+          <div className="w-full rounded-[34px] border border-slate-800 bg-slate-950/70 p-8 text-center text-sm text-slate-400">
+            Verifying admin session...
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!token || !adminUser) {
+    return (
+      <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#123047_0%,#08111f_52%,#020617_100%)] p-4 text-slate-100">
+        <div className="mx-auto flex min-h-screen max-w-md items-center justify-center">
+          <div className="w-full rounded-[34px] border border-slate-800 bg-slate-950/70 p-8 shadow-[0_30px_80px_rgba(2,6,23,0.4)]">
+            <div className="mb-6 flex items-center gap-3">
+              <div className="rounded-2xl bg-cyan-400/15 p-3 text-cyan-200"><Shield className="h-6 w-6" /></div>
+              <div>
+                <div className="text-xs uppercase tracking-[0.24em] text-cyan-300/80">Admin Login</div>
+                <div className="mt-1 text-2xl font-black text-white">Turnless Monopoly</div>
+              </div>
+            </div>
+            <p className="mb-6 text-sm text-slate-400">Use the seeded local admin credentials to access operations tooling.</p>
+            {error && <div className="mb-4 rounded-2xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-100">{error}</div>}
+            <form onSubmit={handleLogin} className="space-y-4">
+              <label className="block text-sm text-slate-300">
+                Username
+                <input
+                  type="text"
+                  value={loginForm.username}
+                  onChange={(event) => setLoginForm((current) => ({ ...current, username: event.target.value }))}
+                  className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-white outline-none"
+                />
+              </label>
+              <label className="block text-sm text-slate-300">
+                Password
+                <input
+                  type="password"
+                  value={loginForm.password}
+                  onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))}
+                  className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-white outline-none"
+                />
+              </label>
+              <button disabled={loginLoading} className="w-full rounded-2xl bg-cyan-500 py-3 font-bold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400">
+                {loginLoading ? 'Signing In...' : 'Sign In'}
+              </button>
+            </form>
+            <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-400">
+              Default local credentials:
+              <div className="mt-2">`admin / admin123`</div>
+              <div>`ops / ops123`</div>
+              <div>`support / support123`</div>
+              <div>`analyst / analyst123`</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const renderLoading = () => (
+    <div className="rounded-[30px] border border-slate-800 bg-slate-950/70 p-8 text-sm text-slate-400">
+      Loading admin data...
+    </div>
+  );
+
+  const renderError = () => error ? (
+    <div className="rounded-[30px] border border-rose-500/30 bg-rose-500/10 p-5 text-sm text-rose-100">
+      {error}
+    </div>
+  ) : null;
+
+  const renderDashboard = () => {
+    const cards = [
+      { label: 'Active Rooms', value: summary?.activeRooms ?? 0, note: 'Rooms still accepting or running matches' },
+      { label: 'Online Players', value: summary?.onlinePlayers ?? 0, note: 'Connected players from backend state' },
+      { label: 'Live Matches', value: summary?.liveMatches ?? 0, note: 'Currently consuming server game state' },
+      { label: 'Debt Cases', value: summary?.debtCases ?? 0, note: 'Players locked into rescue flow' },
+      { label: 'Active Trades', value: summary?.activeTrades ?? 0, note: 'Open offers waiting for response' },
+      { label: 'Auctions Running', value: summary?.activeAuctions ?? 0, note: 'Conflicts requiring live adjudication' },
+    ];
+
+    return (
+      <div className="space-y-6">
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {cards.map((card) => (
+            <div key={card.label} className="rounded-[28px] border border-slate-800 bg-[linear-gradient(160deg,rgba(15,23,42,0.96),rgba(20,33,61,0.88))] p-5 shadow-[0_20px_60px_rgba(2,6,23,0.35)]">
+              <div className="text-xs uppercase tracking-[0.24em] text-slate-500">{card.label}</div>
+              <div className="mt-3 text-4xl font-black text-white">{card.value}</div>
+              <div className="mt-2 text-sm text-slate-400">{card.note}</div>
+            </div>
+          ))}
+        </section>
+
+        <section className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
+          <div className="rounded-[30px] border border-slate-800 bg-slate-950/70 p-6">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-white">Critical Rooms</h2>
+                <p className="text-sm text-slate-400">Top rooms with debt, auction, or active match pressure.</p>
+              </div>
+              <button
+                onClick={() => navigate('/admin/rooms', setPath)}
+                className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-200"
+              >
+                Open Room Monitor
+              </button>
+            </div>
+            <div className="space-y-3">
+              {rooms.slice(0, 4).map((entry) => (
+                <div key={entry.code} className="grid gap-3 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 md:grid-cols-[1.2fr_0.6fr_0.6fr_0.8fr]">
+                  <div>
+                    <div className="text-lg font-bold text-white">{entry.code}</div>
+                    <div className="text-sm text-slate-400">Host: {entry.hostName}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Players</div>
+                    <div className="mt-1 font-semibold text-slate-100">{entry.playerCount}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Debt</div>
+                    <div className="mt-1 font-semibold text-amber-200">{entry.debtCases}</div>
+                  </div>
+                  <div className="flex items-center justify-start md:justify-end">
+                    <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${statusTone(entry.status)}`}>
+                      {entry.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {rooms.length === 0 && <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-400">No rooms found.</div>}
+            </div>
+          </div>
+
+          <div className="rounded-[30px] border border-slate-800 bg-[radial-gradient(circle_at_top,#1e293b_0%,#020617_80%)] p-6">
+            <div className="mb-4 flex items-center gap-3">
+              <Bell className="h-5 w-5 text-amber-300" />
+              <h2 className="text-xl font-bold text-white">System Notes</h2>
+            </div>
+            <div className="space-y-3">
+              {[
+                `Average match duration: ${formatDuration(summary?.averageMatchDurationMs ?? 0)}`,
+                `Ended matches today: ${summary?.endedMatchesToday ?? 0}`,
+                `Latest audit entries: ${auditLogs.length}`,
+              ].map((message) => (
+                <div key={message} className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-300">
+                  {message}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  };
+
+  const renderRooms = () => (
+    <div className="rounded-[30px] border border-slate-800 bg-slate-950/70 p-6">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-white">Room List</h2>
+          <p className="text-sm text-slate-400">Live room overview with intervention-ready summaries.</p>
+        </div>
+        <div className="rounded-full border border-slate-700 bg-slate-900/70 px-4 py-2 text-sm text-slate-300">API: connected to localhost:3001</div>
+      </div>
+      <div className="overflow-hidden rounded-3xl border border-slate-800">
+        <table className="min-w-full divide-y divide-slate-800 text-left">
+          <thead className="bg-slate-900/80 text-xs uppercase tracking-[0.2em] text-slate-500">
+            <tr>
+              <th className="px-5 py-4">Room</th>
+              <th className="px-5 py-4">Host</th>
+              <th className="px-5 py-4">Status</th>
+              <th className="px-5 py-4">Players</th>
+              <th className="px-5 py-4">Debt</th>
+              <th className="px-5 py-4">Trades</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800 bg-slate-950/40">
+            {rooms.map((entry) => (
+              <tr key={entry.code} onClick={() => setSelectedRoomCode(entry.code)} className="cursor-pointer hover:bg-slate-900/60">
+                <td className="px-5 py-4 font-semibold text-white">{entry.code}</td>
+                <td className="px-5 py-4 text-slate-300">{entry.hostName}</td>
+                <td className="px-5 py-4">
+                  <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${statusTone(entry.status)}`}>{entry.status}</span>
+                </td>
+                <td className="px-5 py-4 text-slate-200">{entry.playerCount}</td>
+                <td className="px-5 py-4 text-amber-200">{entry.debtCases}</td>
+                <td className="px-5 py-4 text-cyan-200">{entry.activeTrades}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {selectedRoom && (
+        <div className="mt-6 grid gap-4 xl:grid-cols-[1fr_0.8fr]">
+          <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5">
+            <h3 className="text-lg font-bold text-white">Room Snapshot: {selectedRoom.code}</h3>
+            <div className="mt-2 text-sm text-slate-400">Started {formatDateTime(selectedRoom.gameStartedAt)} • Trades {selectedRoom.tradeOffers.length} • Auction {selectedRoom.auction ? 'active' : 'none'}</div>
+            <div className="mt-4 space-y-3">
+              {selectedRoom.players.map((player) => (
+                <div key={player.id} className="flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
+                  <div>
+                    <div className="font-semibold text-white">{player.avatar} {player.name}</div>
+                    <div className="text-sm text-slate-400">Balance ${player.balance} • Properties {player.properties.length}</div>
+                  </div>
+                  <div className="text-right">
+                    <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${statusTone(player.status)}`}>{player.status}</span>
+                    <div className="mt-2 text-xs text-slate-500">Debt window {formatCountdown(player.debtDeadline)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5">
+            <h3 className="text-lg font-bold text-white">Room Actions</h3>
+            <div className="mt-4 grid gap-3">
+              {canManageRooms && (
+                <button onClick={handleBroadcast} className="rounded-2xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-3 text-left text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20">
+                  Broadcast maintenance notice
+                </button>
+              )}
+              {canManageRooms && (
+                <button onClick={handleForceEnd} className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-left text-sm font-semibold text-rose-100 transition hover:bg-rose-500/20">
+                  Force end current match
+                </button>
+              )}
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-slate-400">
+                Event log entries: {selectedRoom.eventLog.length}
+              </div>
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-slate-400">
+                Auction state: {selectedRoom.auction ? `Bid $${selectedRoom.auction.currentBid}` : 'No active auction'}
+              </div>
+              {!canManageRooms && (
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-slate-500">
+                  Your role is read-only for room interventions.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderPlayers = () => (
+    <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+      <div className="rounded-[30px] border border-slate-800 bg-slate-950/70 p-6">
+        <h2 className="text-xl font-bold text-white">Player Surface</h2>
+        <div className="mt-5 space-y-3">
+          {players.map((player) => (
+            <button key={player.id} onClick={() => setSelectedPlayerId(player.id)} className={`block w-full rounded-3xl border bg-slate-900/70 p-4 text-left ${selectedPlayerId === player.id ? 'border-cyan-500/40' : 'border-slate-800'}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-semibold text-white">{player.avatar} {player.name}</div>
+                  <div className="mt-1 text-sm text-slate-400">ID {player.id} • Room {player.roomCode}</div>
+                </div>
+                <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${statusTone(player.status)}`}>{player.status}</span>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-4">
+                <div><div className="text-xs uppercase tracking-[0.18em] text-slate-500">Balance</div><div className="mt-1 font-semibold text-slate-100">${player.balance}</div></div>
+                <div><div className="text-xs uppercase tracking-[0.18em] text-slate-500">Properties</div><div className="mt-1 font-semibold text-slate-100">{player.properties}</div></div>
+                <div><div className="text-xs uppercase tracking-[0.18em] text-slate-500">Connection</div><div className="mt-1 font-semibold text-slate-100">{player.isConnected ? 'Online' : 'Offline'}</div></div>
+                <div><div className="text-xs uppercase tracking-[0.18em] text-slate-500">Debt Window</div><div className="mt-1 font-semibold text-amber-200">{formatCountdown(player.debtDeadline)}</div></div>
+              </div>
+            </button>
+          ))}
+          {players.length === 0 && <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-400">No players found.</div>}
+        </div>
+      </div>
+      <div className="rounded-[30px] border border-slate-800 bg-slate-950/70 p-6">
+        <h2 className="text-xl font-bold text-white">Player Detail</h2>
+        {selectedPlayer ? (
+          <>
+            <div className="mt-5 rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-semibold text-white">{selectedPlayer.avatar} {selectedPlayer.name}</div>
+                  <div className="mt-1 text-sm text-slate-400">Room {selectedPlayer.roomCode} • Position {selectedPlayer.position}</div>
+                </div>
+                <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${statusTone(selectedPlayer.status)}`}>{selectedPlayer.status}</span>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3 text-sm text-slate-300">Balance: <span className="font-semibold text-white">${selectedPlayer.balance}</span></div>
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3 text-sm text-slate-300">Cooldown: <span className="font-semibold text-white">{formatCountdown(selectedPlayer.cooldownUntil)}</span></div>
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3 text-sm text-slate-300">Debt Window: <span className="font-semibold text-amber-200">{formatCountdown(selectedPlayer.debtDeadline)}</span></div>
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3 text-sm text-slate-300">Assets: <span className="font-semibold text-white">{selectedPlayer.ownedTiles.length}</span></div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3">
+              {canManageBalances && <button onClick={() => runPlayerAction('balance')} className="rounded-2xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-3 text-left text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20">Adjust balance</button>}
+              {canManageCooldowns && <button onClick={() => runPlayerAction('release-jail')} className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-left text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/20">Release from jail</button>}
+              {canManageCooldowns && <button onClick={() => runPlayerAction('reset-cooldown')} className="rounded-2xl border border-slate-600 bg-slate-900/80 px-4 py-3 text-left text-sm font-semibold text-slate-100 transition hover:border-slate-500">Reset cooldown</button>}
+              {canManageBalances && <button onClick={() => runPlayerAction('bankrupt')} className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-left text-sm font-semibold text-amber-100 transition hover:bg-amber-500/20">Force bankrupt</button>}
+              {canKickPlayers && <button onClick={() => runPlayerAction('kick')} className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-left text-sm font-semibold text-rose-100 transition hover:bg-rose-500/20">Kick from room</button>}
+              {!canKickPlayers && !canManageCooldowns && !canManageBalances && (
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-slate-500">
+                  Your role is read-only for player interventions.
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
+              <div className="font-semibold text-white">Recent Events</div>
+              <div className="mt-3 space-y-2">
+                {selectedPlayer.recentEvents.slice(0, 8).map((event) => (
+                  <div key={event} className="rounded-2xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-300">{event}</div>
+                ))}
+                {selectedPlayer.recentEvents.length === 0 && <div className="text-sm text-slate-500">No recent events.</div>}
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-400">Select a player to inspect and act on.</div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderAuditLogs = () => {
+    const toggleAuditExpand = (id: string) => {
+      const newExpanded = new Set(expandedAuditLogIds);
+      if (newExpanded.has(id)) {
+        newExpanded.delete(id);
+      } else {
+        newExpanded.add(id);
+      }
+      setExpandedAuditLogIds(newExpanded);
+    };
+
+    return (
+      <div className="rounded-[30px] border border-slate-800 bg-slate-950/70 p-6">
+        <h2 className="text-xl font-bold text-white">Audit Trail</h2>
+        <p className="mt-1 text-sm text-slate-400">Latest admin interventions captured by the backend in-memory audit log. Click an entry to view before/after details.</p>
+        <div className="mt-5 space-y-2">
+          {auditLogs.map((entry) => {
+            const isExpanded = expandedAuditLogIds.has(entry.id);
+            const changes = getChangedFields(entry.before, entry.after);
+
+            return (
+              <div key={entry.id} className="rounded-2xl border border-slate-800 bg-slate-900/50">
+                <button
+                  onClick={() => toggleAuditExpand(entry.id)}
+                  className="w-full px-5 py-4 text-left hover:bg-slate-900/70 transition-colors"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="text-xl text-slate-500">
+                      {isExpanded ? '▼' : '▶'}
+                    </div>
+                    <div className="flex-1 grid gap-2 md:grid-cols-4 md:gap-4">
+                      <div className="text-sm text-slate-300">{formatDateTime(entry.timestamp)}</div>
+                      <div className="text-sm text-slate-100">{entry.adminId} <span className="text-slate-500 text-xs">({entry.role})</span></div>
+                      <div className="text-sm text-cyan-200">{entry.action}</div>
+                      <div className="text-sm text-slate-400">{entry.targetType}:{entry.targetId}</div>
+                    </div>
+                  </div>
+                </button>
+
+                {isExpanded && (
+                  <div className="border-t border-slate-800 px-5 py-4 bg-slate-950/70">
+                    {changes.length > 0 ? (
+                      <div className="space-y-3">
+                        <div className="text-xs font-semibold text-slate-300 uppercase tracking-widest">Changes ({changes.length})</div>
+                        {changes.map((change) => (
+                          <div key={change.key} className="rounded-lg border border-slate-700/50 bg-slate-900/40 p-3 space-y-2">
+                            <div className="font-mono text-xs text-slate-300">{change.key}</div>
+                            <div className="grid md:grid-cols-2 gap-3">
+                              <div className="text-xs">
+                                <div className="text-slate-500 mb-1">Before:</div>
+                                <div className="font-mono text-slate-300 bg-slate-950/80 rounded px-2 py-1 overflow-auto max-h-24 text-[0.7rem] whitespace-pre-wrap">
+                                  {formatJsonValue(change.from)}
+                                </div>
+                              </div>
+                              <div className="text-xs">
+                                <div className="text-slate-500 mb-1">After:</div>
+                                <div className="font-mono text-slate-300 bg-slate-950/80 rounded px-2 py-1 overflow-auto max-h-24 text-[0.7rem] whitespace-pre-wrap">
+                                  {formatJsonValue(change.to)}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-500">No before/after data captured for this action.</div>
+                    )}
+
+                    {!entry.before && !entry.after && (
+                      <div className="text-xs text-slate-500 italic">This audit entry does not have before/after details.</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {auditLogs.length === 0 && <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-400">No admin actions recorded yet.</div>}
+      </div>
+    );
+  };
+
+  const renderEconomy = () => {
+    if (!configDraft || !configData) return renderLoading();
+
+    const numericFields: Array<{ key: keyof Omit<GameConfigValue, 'featureFlags'>; label: string; note: string }> = [
+      { key: 'initialBalance', label: 'Initial Balance', note: 'Starting cash per player.' },
+      { key: 'passGoReward', label: 'Pass GO Reward', note: 'Cash reward when crossing GO.' },
+      { key: 'cooldownMs', label: 'Cooldown (ms)', note: 'Delay after completing a turn.' },
+      { key: 'propertyDecisionMs', label: 'Property Decision (ms)', note: 'Buy/skip timeout on unowned tiles.' },
+      { key: 'debtDecisionMs', label: 'Debt Window (ms)', note: 'Rescue window before bankruptcy.' },
+      { key: 'tradeExpiryMs', label: 'Trade Expiry (ms)', note: 'Outgoing trade lifetime.' },
+      { key: 'jailFee', label: 'Jail Fee', note: 'Cost to leave jail immediately.' },
+    ];
+
+    const featureFields: Array<{ key: keyof GameConfigValue['featureFlags']; label: string; note: string }> = [
+      { key: 'auction', label: 'Auction', note: 'Allow contested property auctions.' },
+      { key: 'trade', label: 'Trade', note: 'Allow player-to-player barter.' },
+      { key: 'mortgage', label: 'Mortgage', note: 'Allow rescue financing via bank.' },
+      { key: 'housesHotels', label: 'Houses / Hotels', note: 'Allow building upgrades on full color sets.' },
+    ];
+
+    return (
+      <div className="space-y-6">
+        <div className="rounded-[30px] border border-slate-800 bg-slate-950/70 p-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-white">Global Economy Config</h2>
+              <p className="mt-1 text-sm text-slate-400">This data is loaded from MySQL and applied by the backend runtime cache.</p>
+            </div>
+            <div className="text-sm text-slate-400">
+              Updated by <span className="font-semibold text-white">{configData.updatedBy}</span> at {formatDateTime(configData.updatedAt)}
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {numericFields.map((field) => (
+              <label key={field.key} className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
+                <div className="text-sm font-semibold text-white">{field.label}</div>
+                <div className="mt-1 text-xs text-slate-500">{field.note}</div>
+                <input
+                  type="number"
+                  value={configDraft[field.key]}
+                  disabled={!canManageBalances}
+                  onChange={(event) => updateConfigNumber(field.key, event.target.value)}
+                  className="mt-4 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </label>
+            ))}
+          </div>
+
+          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {featureFields.map((field) => (
+              <label key={field.key} className="flex items-start gap-3 rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
+                <input
+                  type="checkbox"
+                  checked={configDraft.featureFlags[field.key]}
+                  disabled={!canManageBalances}
+                  onChange={(event) => updateConfigFlag(field.key, event.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-slate-600 bg-slate-950"
+                />
+                <div>
+                  <div className="text-sm font-semibold text-white">{field.label}</div>
+                  <div className="mt-1 text-xs text-slate-500">{field.note}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            {canManageBalances && (
+              <button onClick={handleSaveConfig} className="rounded-2xl border border-cyan-500/40 bg-cyan-500/10 px-5 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20">
+                Save Config
+              </button>
+            )}
+            <button onClick={() => void refreshConfig()} className="rounded-2xl border border-slate-700 bg-slate-900/80 px-5 py-3 text-sm font-semibold text-slate-100">
+              Reload from DB
+            </button>
+            {!canManageBalances && (
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-sm text-slate-500">
+                Your role can inspect config but cannot change it.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderBoard = () => {
+    if (!boardData) return renderLoading();
+
+    return (
+      <div className="space-y-6">
+        <div className="rounded-[30px] border border-slate-800 bg-slate-950/70 p-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-white">Published Board</h2>
+              <p className="mt-1 text-sm text-slate-400">Published board versions are stored in MySQL. New rooms will use the latest published template.</p>
+            </div>
+            <div className="text-sm text-slate-400">
+              Active version <span className="font-semibold text-white">{boardData.versionName}</span> by {boardData.createdBy}
+            </div>
+          </div>
+
+          <div className="mt-6 flex flex-col gap-6">
+            <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4 overflow-hidden">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="text-sm font-semibold text-white">Interactive Board (Drag to reorder)</div>
+                <div className="text-xs text-slate-500">{boardData.board.length} Tiles</div>
+              </div>
+              <div className="flex justify-center p-4 bg-slate-950/50 rounded-2xl w-full">
+                <div 
+                  style={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: `repeat(${Math.ceil(boardData.board.length / 4) + 1}, 1fr)`,
+                    gridTemplateRows: `repeat(${Math.ceil(boardData.board.length / 4) + 1}, 1fr)`,
+                    gap: '4px',
+                  }}
+                  className="w-full max-w-[800px] aspect-square"
+                >
+                  {boardData.board.map((tile, idx) => {
+                    const colorStyle = tile.colorGroup 
+                      ? { backgroundColor: tile.colorGroup === 'brown' ? '#8B4513' : tile.colorGroup === 'lightBlue' ? '#87CEEB' : tile.colorGroup === 'pink' ? '#FFC0CB' : tile.colorGroup === 'orange' ? '#FFA500' : tile.colorGroup === 'red' ? '#FF0000' : tile.colorGroup === 'yellow' ? '#FFFF00' : tile.colorGroup === 'green' ? '#008000' : tile.colorGroup === 'darkBlue' ? '#00008B' : tile.colorGroup } 
+                      : {};
+                    return (
+                      <div
+                        key={tile.id}
+                        draggable={canManageBalances}
+                        onDragStart={() => handleDragStart(idx)}
+                        onDragOver={handleDragOver}
+                        onDrop={() => handleDrop(idx)}
+                        onClick={() => setSelectedBoardTileId(tile.id)}
+                        style={getTileGridStyle(idx, boardData.board.length)}
+                        className={`relative flex flex-col items-center justify-center rounded-xl border p-1 sm:p-2 text-center cursor-pointer transition-all select-none ${
+                          selectedBoardTileId === tile.id 
+                            ? 'border-cyan-500 bg-cyan-500/20 shadow-[0_0_15px_rgba(6,182,212,0.3)] z-10' 
+                            : 'border-slate-700 bg-slate-800 hover:border-slate-500'
+                        } ${draggedTileIndex === idx ? 'opacity-50 scale-95' : ''}`}
+                      >
+                        <div className="absolute top-1 left-1 text-[9px] text-slate-500 font-mono z-10 bg-slate-900/80 px-1 rounded">{idx}</div>
+                        {tile.colorGroup && (
+                          <div 
+                            className="absolute top-0 inset-x-0 h-2 rounded-t-xl opacity-80" 
+                            style={colorStyle}
+                          />
+                        )}
+                        <div className="text-xs font-bold text-white leading-tight mt-2 z-10">{tile.name}</div>
+                        <div className="text-[9px] text-slate-400 mt-1 uppercase z-10">{tile.type}</div>
+                        {tile.price ? <div className="text-[10px] font-mono text-emerald-400 mt-1 z-10">${tile.price}</div> : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {canManageBalances && (
+                <button
+                  onClick={handleAddTile}
+                  className="mt-4 w-full rounded-2xl border border-dashed border-slate-700 bg-slate-900/50 py-3 text-sm font-semibold text-slate-300 transition hover:bg-slate-900 hover:text-white"
+                >
+                  + Add Tile
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              {selectedBoardTile ? (
+                <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-lg font-bold text-white">{selectedBoardTile.name}</div>
+                      <div className="text-sm text-slate-500">Tile ID {selectedBoardTile.id} • type {selectedBoardTile.type}</div>
+                    </div>
+                    <span className="rounded-full border border-slate-700 bg-slate-950/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-300">
+                      Index {selectedBoardTile.index}
+                    </span>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <label className="text-sm text-slate-300">
+                      Name
+                      <input
+                        type="text"
+                        value={selectedBoardTile.name}
+                        disabled={!canManageBalances}
+                        onChange={(event) => updateBoardTile('name', event.target.value)}
+                        className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                      />
+                    </label>
+                    <label className="text-sm text-slate-300">
+                      Type
+                      <select
+                        value={selectedBoardTile.type}
+                        disabled={!canManageBalances}
+                        onChange={(event) => updateBoardTile('type', event.target.value)}
+                        className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {['go', 'property', 'railroad', 'utility', 'tax', 'chance', 'chest', 'jail', 'gotojail', 'parking'].map((type) => (
+                          <option key={type} value={type}>{type}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-sm text-slate-300">
+                      Price
+                      <input
+                        type="number"
+                        value={selectedBoardTile.price ?? ''}
+                        disabled={!canManageBalances}
+                        onChange={(event) => updateBoardTile('price', event.target.value)}
+                        className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                      />
+                    </label>
+                    <label className="text-sm text-slate-300">
+                      Rent
+                      <input
+                        type="number"
+                        value={selectedBoardTile.rent ?? ''}
+                        disabled={!canManageBalances}
+                        onChange={(event) => updateBoardTile('rent', event.target.value)}
+                        className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                      />
+                    </label>
+                    <label className="text-sm text-slate-300">
+                      Tax Amount
+                      <input
+                        type="number"
+                        value={selectedBoardTile.taxAmount ?? ''}
+                        disabled={!canManageBalances}
+                        onChange={(event) => updateBoardTile('taxAmount', event.target.value)}
+                        className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                      />
+                    </label>
+                    <label className="text-sm text-slate-300">
+                      House Cost
+                      <input
+                        type="number"
+                        value={selectedBoardTile.houseCost ?? ''}
+                        disabled={!canManageBalances}
+                        onChange={(event) => updateBoardTile('houseCost', event.target.value)}
+                        className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                      />
+                    </label>
+                    <label className="text-sm text-slate-300">
+                      Color Group
+                      <input
+                        type="text"
+                        value={selectedBoardTile.colorGroup ?? ''}
+                        disabled={!canManageBalances}
+                        onChange={(event) => updateBoardTile('colorGroup', event.target.value)}
+                        className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                      />
+                    </label>
+                  </div>
+                  {canManageBalances && (
+                    <div className="mt-4 flex justify-end">
+                      <button
+                        onClick={() => handleRemoveTile(selectedBoardTile.id)}
+                        className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-semibold text-rose-200 transition hover:bg-rose-500/20"
+                      >
+                        Remove Tile
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-400">
+                    Published board templates must start clean:
+                    no `ownerPlayerId`, no mortgage state, and no prebuilt houses/hotels.
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 text-sm text-slate-400">
+                  Select a tile to inspect and edit the board draft.
+                </div>
+              )}
+
+              <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5">
+                <div className="text-lg font-bold text-white">Publish Version</div>
+                <div className="mt-1 text-sm text-slate-500">Publishing writes a new board snapshot to MySQL and updates the template used for future rooms.</div>
+                <div className="mt-4 flex flex-col gap-3 md:flex-row">
+                  <input
+                    type="text"
+                    value={boardVersionName}
+                    disabled={!canManageBalances}
+                    onChange={(event) => setBoardVersionName(event.target.value)}
+                    placeholder="version-name"
+                    className="flex-1 rounded-2xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                  {canManageBalances && (
+                    <button onClick={handlePublishBoard} className="rounded-2xl border border-cyan-500/40 bg-cyan-500/10 px-5 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20">
+                      Publish Board
+                    </button>
+                  )}
+                  <button onClick={handleResetBoardDraft} className="rounded-2xl border border-slate-700 bg-slate-950/80 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-slate-800">
+                    Reload Active
+                  </button>
+                  {canManageBalances && (
+                    <button onClick={handleClearBoard} className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-5 py-3 text-sm font-semibold text-rose-200 transition hover:bg-rose-500/20">
+                      Clear Board
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-[30px] border border-slate-800 bg-slate-950/70 p-6">
+          <h2 className="text-xl font-bold text-white">Version History</h2>
+          <div className="mt-4 overflow-hidden rounded-3xl border border-slate-800">
+            <table className="min-w-full divide-y divide-slate-800 text-left">
+              <thead className="bg-slate-900/80 text-xs uppercase tracking-[0.2em] text-slate-500">
+                <tr>
+                  <th className="px-5 py-4">Version</th>
+                  <th className="px-5 py-4">Created By</th>
+                  <th className="px-5 py-4">Created At</th>
+                  <th className="px-5 py-4">Published At</th>
+                  <th className="px-5 py-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800 bg-slate-950/40">
+                {boardVersions.map((version) => (
+                  <tr key={version.id}>
+                    <td className="px-5 py-4 font-semibold text-white">{version.versionName}</td>
+                    <td className="px-5 py-4 text-slate-300">{version.createdBy}</td>
+                    <td className="px-5 py-4 text-slate-300">{formatDateTime(version.createdAt)}</td>
+                    <td className="px-5 py-4 text-cyan-200">{formatDateTime(version.publishedAt)}</td>
+                    <td className="px-5 py-4 text-right">
+                      <button
+                        onClick={() => handleLoadVersion(version.id)}
+                        className="text-xs font-semibold text-blue-400 hover:text-blue-300"
+                      >
+                        Load Draft
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderPlaceholder = (title: string, bullets: string[]) => (
+    <div className="rounded-[30px] border border-slate-800 bg-slate-950/70 p-6">
+      <h2 className="text-xl font-bold text-white">{title}</h2>
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        {bullets.map((bullet) => (
+          <div key={bullet} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-300">
+            {bullet}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderSkins = () => {
+    return (
+      <div className="space-y-6">
+        <div className="rounded-[30px] border border-slate-800 bg-slate-950/70 p-6">
+          <h2 className="text-xl font-bold text-white">Create New Skin</h2>
+          <div className="mt-4 grid gap-4 md:grid-cols-[1fr_200px_2fr_auto]">
+            <input
+              type="text"
+              placeholder="Skin Name (e.g. Desert Theme)"
+              value={newSkin.name}
+              onChange={(e) => setNewSkin({ ...newSkin, name: e.target.value })}
+              className="rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none"
+            />
+            <select
+              value={newSkin.type}
+              onChange={(e) => setNewSkin({ ...newSkin, type: e.target.value as 'image' | 'color' })}
+              className="rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none"
+            >
+              <option value="image">Background Image</option>
+              <option value="color">Solid Color</option>
+            </select>
+            <input
+              type="text"
+              placeholder={newSkin.type === 'image' ? 'Image URL (e.g. https://...)' : 'Hex Color (e.g. #000000)'}
+              value={newSkin.value}
+              onChange={(e) => setNewSkin({ ...newSkin, value: e.target.value })}
+              className="rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none"
+            />
+            <button
+              onClick={handleCreateSkin}
+              disabled={!newSkin.name || !newSkin.value}
+              className="rounded-2xl border border-cyan-500/40 bg-cyan-500/10 px-5 py-3 font-semibold text-cyan-200 transition hover:bg-cyan-500/20 disabled:opacity-50"
+            >
+              Create Skin
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-[30px] border border-slate-800 bg-slate-950/70 p-6">
+          <h2 className="text-xl font-bold text-white">Available Skins</h2>
+          <div className="mt-4 overflow-hidden rounded-3xl border border-slate-800">
+            <table className="min-w-full divide-y divide-slate-800 text-left">
+              <thead className="bg-slate-900/80 text-xs uppercase tracking-[0.2em] text-slate-500">
+                <tr>
+                  <th className="px-5 py-4">Name</th>
+                  <th className="px-5 py-4">Type</th>
+                  <th className="px-5 py-4">Value / Preview</th>
+                  <th className="px-5 py-4">Created By</th>
+                  <th className="px-5 py-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800 bg-slate-950/40">
+                {boardSkins.map((skin) => (
+                  <tr key={skin.id}>
+                    <td className="px-5 py-4 font-semibold text-white">{skin.name}</td>
+                    <td className="px-5 py-4 text-slate-300 capitalize">{skin.type}</td>
+                    <td className="px-5 py-4 text-slate-300">
+                      <div className="flex items-center gap-3">
+                        {skin.type === 'image' ? (
+                          <div className="h-8 w-8 rounded-lg bg-cover bg-center border border-slate-700" style={{ backgroundImage: `url(${skin.value})` }} />
+                        ) : (
+                          <div className="h-8 w-8 rounded-lg border border-slate-700" style={{ backgroundColor: skin.value }} />
+                        )}
+                        <span className="truncate max-w-[200px]" title={skin.value}>{skin.value}</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-4 text-slate-400">{skin.createdBy}</td>
+                    <td className="px-5 py-4 text-right">
+                      <button
+                        onClick={() => handleDeleteSkin(skin.id)}
+                        className="rounded-xl bg-slate-900 px-3 py-1 text-sm font-semibold text-rose-400 hover:bg-slate-800"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {boardSkins.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-5 py-8 text-center text-slate-500">
+                      No skins available. Create one above.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderContent = () => {
+    if (loading) return renderLoading();
+
+    switch (path) {
+      case '/admin':
+        return renderDashboard();
+      case '/admin/rooms':
+        return renderRooms();
+      case '/admin/players':
+        return renderPlayers();
+      case '/admin/audit-logs':
+        return renderAuditLogs();
+      case '/admin/economy':
+        return renderEconomy();
+      case '/admin/board':
+        return renderBoard();
+      case '/admin/skins':
+        return renderSkins();
+      case '/admin/analytics':
+        return renderPlaceholder('Analytics Draft', ['Most profitable properties and debt hotspot tracking.', 'Trade frequency, bankruptcy rate, and average match duration.', 'Charts should be fed by persisted match summaries, not live room memory only.']);
+      default:
+        return renderDashboard();
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#123047_0%,#08111f_52%,#020617_100%)] text-slate-100">
+      {notices.length > 0 && (
+        <div className="fixed right-4 top-4 z-[90] flex w-80 flex-col gap-2">
+          {notices.map((notice) => (
+            <button
+              key={notice.id}
+              onClick={() => removeNotice(notice.id)}
+              className={`rounded-2xl border px-4 py-3 text-left text-sm shadow-lg ${
+                notice.tone === 'success'
+                  ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-100'
+                  : notice.tone === 'warning'
+                    ? 'border-amber-500/40 bg-amber-500/15 text-amber-100'
+                    : 'border-cyan-500/40 bg-cyan-500/15 text-cyan-100'
+              }`}
+            >
+              {notice.message}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="grid min-h-screen lg:grid-cols-[280px_1fr]">
+        <aside className="border-r border-slate-800 bg-slate-950/80 p-6">
+          <div className="rounded-[28px] border border-cyan-500/15 bg-[linear-gradient(160deg,rgba(9,32,48,0.95),rgba(7,14,24,0.95))] p-5">
+            <div className="flex items-center gap-3">
+              <div className="rounded-2xl bg-cyan-400/15 p-3 text-cyan-200"><Shield className="h-6 w-6" /></div>
+              <div>
+                <div className="text-xs uppercase tracking-[0.24em] text-cyan-300/80">Admin Console</div>
+                <div className="mt-1 text-xl font-black text-white">Turnless Monopoly</div>
+              </div>
+            </div>
+            <div className="mt-4 text-sm text-slate-400">Live backend monitor for rooms, players, and game interventions.</div>
+          </div>
+
+          <nav className="mt-6 space-y-2">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const active = item.path === path;
+              return (
+                <button
+                  key={item.path}
+                  onClick={() => navigate(item.path, setPath)}
+                  className={`w-full rounded-2xl border px-4 py-4 text-left transition ${
+                    active
+                      ? 'border-cyan-500/40 bg-cyan-500/12 shadow-[0_12px_30px_rgba(34,211,238,0.08)]'
+                      : 'border-slate-800 bg-slate-950/45 hover:border-slate-700 hover:bg-slate-900/70'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`rounded-xl p-2 ${active ? 'bg-cyan-400/15 text-cyan-200' : 'bg-slate-900 text-slate-400'}`}>
+                      <Icon className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-white">{item.label}</div>
+                      <div className="text-xs text-slate-500">{item.description}</div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </nav>
+        </aside>
+
+        <main className="p-4 md:p-6 xl:p-8">
+          <div className="rounded-[34px] border border-slate-800 bg-slate-950/50 p-4 md:p-6 xl:p-8">
+            <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Admin Route</div>
+                <h1 className="mt-2 text-3xl font-black text-white md:text-4xl">{pageMeta.title}</h1>
+                <p className="mt-2 max-w-3xl text-sm text-slate-400 md:text-base">{pageMeta.subtitle}</p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <div className="rounded-full border border-slate-700 bg-slate-900/70 px-4 py-2 text-sm text-slate-300">
+                  <Radio className="mr-2 inline h-4 w-4 text-emerald-300" /> API healthy
+                </div>
+                <div className="rounded-full border border-slate-700 bg-slate-900/70 px-4 py-2 text-sm text-slate-300">
+                  <Lock className="mr-2 inline h-4 w-4 text-cyan-300" /> {adminUser.displayName} ({adminUser.role})
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="rounded-full border border-slate-700 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200"
+                >
+                  Logout
+                </button>
+                <button
+                  onClick={() => {
+                    window.location.href = '/';
+                  }}
+                  className="rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-200"
+                >
+                  Exit Admin
+                </button>
+              </div>
+            </div>
+
+            {renderError()}
+            {renderContent()}
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+};
