@@ -245,7 +245,11 @@ export const getStoredGameConfig = async (): Promise<GameConfig> => {
     return DEFAULT_GAME_CONFIG;
   }
 
-  return JSON.parse(String(rows[0].value_json)) as GameConfig;
+  const valueJson = rows[0].value_json;
+  if (typeof valueJson === 'string') {
+    return JSON.parse(valueJson) as GameConfig;
+  }
+  return valueJson as unknown as GameConfig;
 };
 
 export const getStoredPublishedBoard = async (): Promise<Tile[]> => {
@@ -263,5 +267,9 @@ export const getStoredPublishedBoard = async (): Promise<Tile[]> => {
     return DEFAULT_BOARD_TEMPLATE.map((tile) => ({ ...tile }));
   }
 
-  return JSON.parse(String(rows[0].board_json)) as Tile[];
+  const boardJson = rows[0].board_json;
+  if (typeof boardJson === 'string') {
+    return JSON.parse(boardJson) as Tile[];
+  }
+  return boardJson as unknown as Tile[];
 };
