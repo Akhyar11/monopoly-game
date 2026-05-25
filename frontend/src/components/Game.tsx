@@ -163,12 +163,17 @@ export const Game: React.FC = () => {
           
           if (current !== undefined && current !== target) {
             changed = true;
-            if (current === 21 && target === 7) {
-              next[player.id] = 7;
-            } else if ((current - target + 28) % 28 === 3) {
-              next[player.id] = (current - 1 + 28) % 28;
+            const N = currentRoom.board.length;
+            const sideLen = Math.floor(N / 4);
+            const goToJailIndex = 3 * sideLen;
+            const jailIndex = sideLen;
+
+            if (current === goToJailIndex && target === jailIndex) {
+              next[player.id] = jailIndex;
+            } else if ((current - target + N) % N === 3) {
+              next[player.id] = (current - 1 + N) % N;
             } else {
-              next[player.id] = (current + 1) % 28;
+              next[player.id] = (current + 1) % N;
             }
           } else if (current === undefined) {
             changed = true;
@@ -489,26 +494,27 @@ export const Game: React.FC = () => {
               gridTemplateRows: `1.5fr repeat(${Math.ceil(room.board.length / 4) - 1}, 1fr) 1.5fr`,
             }}
           >
-            {room.board.map((tile, index) => {
-              const isBottom = index < 8;
-              const isLeft = index >= 8 && index < 15;
-              const isTop = index >= 15 && index < 22;
+            {(() => {
+              const N = room.board.length;
+              const side = Math.ceil(N / 4);
+              const gridSize = side + 1;
 
-              let row;
-              let col;
-              if (isBottom) {
-                row = 8;
-                col = 8 - index;
-              } else if (isLeft) {
-                row = 8 - (index - 7);
-                col = 1;
-              } else if (isTop) {
-                row = 1;
-                col = index - 14 + 1;
-              } else {
-                row = index - 21 + 1;
-                col = 8;
-              }
+              return room.board.map((tile, index) => {
+                let row;
+                let col;
+                if (index < side) {
+                  row = gridSize;
+                  col = gridSize - index;
+                } else if (index < side * 2) {
+                  row = gridSize - (index - side);
+                  col = 1;
+                } else if (index < side * 3) {
+                  row = 1;
+                  col = index - side * 2 + 1;
+                } else {
+                  row = index - side * 3 + 1;
+                  col = gridSize;
+                }
 
               const playersOnTile = room.players.filter((player) => (visualPositions[player.id] ?? player.position) === index && player.status !== 'bankrupt');
               const tileRentLabel = rentLabel(room, tile);
@@ -576,9 +582,18 @@ export const Game: React.FC = () => {
                   </div>
                 </div>
               );
-            })}
+            });
+          })()}
 
-            <div className="pointer-events-none col-start-2 col-end-8 row-start-2 row-end-8 flex items-center justify-center opacity-10">
+            <div 
+              style={{
+                gridColumnStart: 2,
+                gridColumnEnd: Math.ceil(room.board.length / 4) + 1,
+                gridRowStart: 2,
+                gridRowEnd: Math.ceil(room.board.length / 4) + 1,
+              }}
+              className="pointer-events-none flex items-center justify-center opacity-10"
+            >
               <span className="text-7xl font-black md:text-9xl">MONOPOLY</span>
             </div>
           </div>

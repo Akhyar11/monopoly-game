@@ -139,7 +139,8 @@ export class GameEngine {
       if (player.consecutiveDoubles >= 3) {
         // Third double in a row: send to jail
         this.addEventLog(room, `${player.name} rolled doubles 3 times and went to jail!`);
-        player.position = 10; // Go to jail (typically index 10)
+        const jailIdx = room.board.findIndex((boardTile) => boardTile.type === 'jail');
+        player.position = jailIdx !== -1 ? jailIdx : 10;
         player.status = 'jailed';
         player.consecutiveDoubles = 0;
         this.checkRoundReset(room);
