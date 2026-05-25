@@ -27,6 +27,8 @@ type Props = {
   handleLoadVersion: (id: number) => void;
   handleImportBoard: (board: BoardTile[]) => void;
   renderLoading: () => React.ReactNode;
+  boardNotFound?: boolean;
+  handleInitializeBoard?: () => void;
 };
 
 export const BoardView: React.FC<Props> = ({
@@ -54,8 +56,40 @@ export const BoardView: React.FC<Props> = ({
   handleLoadVersion,
   handleImportBoard,
   renderLoading,
+  boardNotFound,
+  handleInitializeBoard,
 }) => {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  if (boardNotFound) {
+    return (
+      <div className="rounded-[30px] border border-cyan-500/20 bg-slate-950/40 p-8 backdrop-blur-md text-center max-w-xl mx-auto my-12 space-y-6 shadow-2xl">
+        <div className="mx-auto w-16 h-16 rounded-2xl bg-cyan-500/10 flex items-center justify-center border border-cyan-500/30">
+          <svg className="w-8 h-8 text-cyan-400 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A2 2 0 013 15.382V6.618a2 2 0 011.106-1.789L9 2m0 18v-8m0 8l5.447-2.724A2 2 0 0021 15.382V6.618a2 2 0 00-1.106-1.789L15 2m-6 0l6 3m-6 3h.01M9 12h.01M9 16h.01" />
+          </svg>
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-2xl font-black tracking-tight text-white">Initialize Board Editor</h2>
+          <p className="text-slate-400 text-sm leading-relaxed">
+            No published board configuration found in the database. Deploy the classic Monopoly map loaded with standard pricing structure, color groupings, and utilities to enable live room creation.
+          </p>
+        </div>
+        {canManageBalances ? (
+          <button
+            onClick={handleInitializeBoard}
+            className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold shadow-lg shadow-cyan-500/20 active:scale-[0.98] transition-all duration-200 uppercase tracking-wider text-xs"
+          >
+            Create Initial Board Template
+          </button>
+        ) : (
+          <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-4 text-xs text-amber-200 leading-normal">
+            You do not have administrative privileges to initialize the global board layout. Please contact a Super Admin.
+          </div>
+        )}
+      </div>
+    );
+  }
 
   if (!boardData) return <>{renderLoading()}</>;
 

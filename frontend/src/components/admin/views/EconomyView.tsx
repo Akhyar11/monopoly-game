@@ -5,6 +5,8 @@ import { formatDateTime } from '../utils';
 type Props = {
   configData: GameConfigResponse | null;
   configDraft: GameConfigValue | null;
+  configNotFound?: boolean;
+  handleInitializeConfig?: () => void;
   canManageBalances: boolean;
   updateConfigNumber: (key: keyof Omit<GameConfigValue, 'featureFlags' | 'sfx'>, value: string) => void;
   updateConfigFlag: (key: keyof GameConfigValue['featureFlags'], checked: boolean) => void;
@@ -18,6 +20,8 @@ type Props = {
 export const EconomyView: React.FC<Props> = ({
   configData,
   configDraft,
+  configNotFound,
+  handleInitializeConfig,
   canManageBalances,
   updateConfigNumber,
   updateConfigFlag,
@@ -27,6 +31,36 @@ export const EconomyView: React.FC<Props> = ({
   refreshConfig,
   renderLoading,
 }) => {
+  if (configNotFound) {
+    return (
+      <div className="rounded-[30px] border border-cyan-500/20 bg-slate-950/40 p-8 backdrop-blur-md text-center max-w-xl mx-auto my-12 space-y-6 shadow-2xl">
+        <div className="mx-auto w-16 h-16 rounded-2xl bg-cyan-500/10 flex items-center justify-center border border-cyan-500/30">
+          <svg className="w-8 h-8 text-cyan-400 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 3m0-3a2 2 0 110 3m-9 8h10M3 5h10M3 13h10M7 21h10m0 0a2 2 0 100-4m0 4a2 2 0 110-4m0 0V10" />
+          </svg>
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-2xl font-black tracking-tight text-white">Initialize Economy Console</h2>
+          <p className="text-slate-400 text-sm leading-relaxed">
+            No game configuration found in the database. Kickstart the Turnless Monopoly economy engine by seeding default pacing rules, payout thresholds, and feature flags.
+          </p>
+        </div>
+        {canManageBalances ? (
+          <button
+            onClick={handleInitializeConfig}
+            className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold shadow-lg shadow-cyan-500/20 active:scale-[0.98] transition-all duration-200 uppercase tracking-wider text-xs"
+          >
+            Create Initial Configuration
+          </button>
+        ) : (
+          <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-4 text-xs text-amber-200 leading-normal">
+            You do not have administrative privileges to initialize the global economy parameters. Please contact a Super Admin.
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (!configDraft || !configData) return <>{renderLoading()}</>;
 
   const numericFields: Array<{ key: keyof Omit<GameConfigValue, 'featureFlags' | 'sfx'>; label: string; note: string }> = [

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 
 import type { AdminRoute, DashboardSummary, RoomSummary, PlayerSummary, PlayerDetail, AuditLog, Notice, NoticeTone, AdminUser, GameConfigValue, GameConfigResponse, PublishedBoardResponse, BoardVersionSummary, BoardTile, BoardSkin, RoomDetail, GameCard, CardAction } from './types';
-import { ADMIN_API_URL, ADMIN_STORAGE_KEY, navItems, routeTitle } from './constants';
+import { ADMIN_API_URL, ADMIN_STORAGE_KEY, navItems, routeTitle, DEFAULT_GAME_CONFIG, DEFAULT_BOARD_TEMPLATE } from './constants';
 import { toAdminRoute, navigate, hasAdminRole } from './utils';
 import { fetchAdmin } from './api';
 import { DashboardView } from './views/DashboardView';
@@ -38,7 +38,9 @@ export const AdminPanel: React.FC = () => {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [configData, setConfigData] = useState<GameConfigResponse | null>(null);
   const [configDraft, setConfigDraft] = useState<GameConfigValue | null>(null);
+  const [configNotFound, setConfigNotFound] = useState(false);
   const [boardData, setBoardData] = useState<PublishedBoardResponse | null>(null);
+  const [boardNotFound, setBoardNotFound] = useState(false);
   const [boardVersions, setBoardVersions] = useState<BoardVersionSummary[]>([]);
   const [boardSkins, setBoardSkins] = useState<BoardSkin[]>([]);
   const [cards, setCards] = useState<GameCard[]>([]);
@@ -215,6 +217,7 @@ export const AdminPanel: React.FC = () => {
 
     let cancelled = false;
     const loadConfig = async () => {
+      setConfigNotFound(false);
       try {
         const data = await fetchAdmin<GameConfigResponse>('/admin/config', token);
         if (cancelled) return;
@@ -222,7 +225,12 @@ export const AdminPanel: React.FC = () => {
         setConfigDraft(data.value);
       } catch (loadError) {
         if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : 'Failed to load config');
+          const errMsg = loadError instanceof Error ? loadError.message : '';
+          if (errMsg.includes('404') || errMsg.toLowerCase().includes('not found')) {
+            setConfigNotFound(true);
+          } else {
+            setError(errMsg || 'Failed to load config');
+          }
         }
       }
     };
@@ -238,6 +246,7 @@ export const AdminPanel: React.FC = () => {
 
     let cancelled = false;
     const loadBoard = async () => {
+      setBoardNotFound(false);
       try {
         const [publishedBoard, versions] = await Promise.all([
           fetchAdmin<PublishedBoardResponse>('/admin/board', token),
@@ -249,7 +258,16 @@ export const AdminPanel: React.FC = () => {
         setBoardVersionName(`${publishedBoard.versionName}-copy`);
       } catch (loadError) {
         if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : 'Failed to load board');
+          const errMsg = loadError instanceof Error ? loadError.message : '';
+          if (errMsg.includes('404') || errMsg.toLowerCase().includes('not found')) {
+            setBoardNotFound(true);
+            try {
+              const versions = await fetchAdmin<BoardVersionSummary[]>('/admin/board/versions', token);
+              setBoardVersions(versions);
+            } catch (_) {}
+          } else {
+            setError(errMsg || 'Failed to load board');
+          }
         }
       }
     };
@@ -578,6 +596,21 @@ export const AdminPanel: React.FC = () => {
     }
   };
 
+  const handleInitializeConfig = async () => {
+    if (!token) return;
+    try {
+      await fetchAdmin('/admin/config', token, {
+        method: 'PUT',
+        body: JSON.stringify(DEFAULT_GAME_CONFIG),
+      });
+      setConfigNotFound(false);
+      await Promise.all([refreshConfig(), refreshAuditLogs()]);
+      pushNotice('Game configuration initialized successfully.', 'success');
+    } catch (err) {
+      pushNotice(err instanceof Error ? err.message : 'Initialization failed', 'warning');
+    }
+  };
+
   const updateBoardTile = (field: keyof BoardTile, rawValue: string | boolean) => {
     setBoardData((current) => {
       if (!current || !selectedBoardTileId) return current;
@@ -725,6 +758,21 @@ export const AdminPanel: React.FC = () => {
       pushNotice(`Board version "${versionName}" published to MySQL.`, 'success');
     } catch (actionError) {
       pushNotice(actionError instanceof Error ? actionError.message : 'Board publish failed', 'warning');
+    }
+  };
+
+  const handleInitializeBoard = async () => {
+    if (!token) return;
+    try {
+      await fetchAdmin('/admin/board/publish', token, {
+        method: 'POST',
+        body: JSON.stringify({ versionName: 'default-v1', board: DEFAULT_BOARD_TEMPLATE, skinId: null }),
+      });
+      setBoardNotFound(false);
+      await Promise.all([refreshBoard(), refreshAuditLogs()]);
+      pushNotice('Board template initialized successfully with Jakarta standard layout.', 'success');
+    } catch (err) {
+      pushNotice(err instanceof Error ? err.message : 'Initialization failed', 'warning');
     }
   };
 
@@ -883,9 +931,9 @@ export const AdminPanel: React.FC = () => {
       case '/admin/audit-logs':
         return <AuditLogsView auditLogs={auditLogs} />;
       case '/admin/economy':
-        return <EconomyView configData={configData} configDraft={configDraft} canManageBalances={canManageBalances} updateConfigNumber={updateConfigNumber} updateConfigFlag={updateConfigFlag} updateConfigSfx={updateConfigSfx} handleUploadAudio={handleUploadAudio} handleSaveConfig={handleSaveConfig} refreshConfig={refreshConfig} renderLoading={renderLoading} />;
+        return <EconomyView configData={configData} configDraft={configDraft} configNotFound={configNotFound} handleInitializeConfig={handleInitializeConfig} canManageBalances={canManageBalances} updateConfigNumber={updateConfigNumber} updateConfigFlag={updateConfigFlag} updateConfigSfx={updateConfigSfx} handleUploadAudio={handleUploadAudio} handleSaveConfig={handleSaveConfig} refreshConfig={refreshConfig} renderLoading={renderLoading} />;
       case '/admin/board':
-        return <BoardView boardData={boardData} boardVersions={boardVersions} boardSkins={boardSkins} boardVersionName={boardVersionName} setBoardVersionName={setBoardVersionName} boardSkinId={boardSkinId} setBoardSkinId={setBoardSkinId} selectedBoardTileId={selectedBoardTileId} setSelectedBoardTileId={setSelectedBoardTileId} selectedBoardTile={selectedBoardTile} canManageBalances={canManageBalances} draggedTileIndex={draggedTileIndex} handleDragStart={handleDragStart} handleDragOver={handleDragOver} handleDrop={handleDrop} handleAddTile={handleAddTile} updateBoardTile={updateBoardTile} handleRemoveTile={handleRemoveTile} handlePublishBoard={handlePublishBoard} handleResetBoardDraft={handleResetBoardDraft} handleClearBoard={handleClearBoard} handleLoadVersion={handleLoadVersion} handleImportBoard={handleImportBoard} renderLoading={renderLoading} />;
+        return <BoardView boardData={boardData} boardVersions={boardVersions} boardSkins={boardSkins} boardVersionName={boardVersionName} setBoardVersionName={setBoardVersionName} boardSkinId={boardSkinId} setBoardSkinId={setBoardSkinId} selectedBoardTileId={selectedBoardTileId} setSelectedBoardTileId={setSelectedBoardTileId} selectedBoardTile={selectedBoardTile} canManageBalances={canManageBalances} draggedTileIndex={draggedTileIndex} handleDragStart={handleDragStart} handleDragOver={handleDragOver} handleDrop={handleDrop} handleAddTile={handleAddTile} updateBoardTile={updateBoardTile} handleRemoveTile={handleRemoveTile} handlePublishBoard={handlePublishBoard} handleResetBoardDraft={handleResetBoardDraft} handleClearBoard={handleClearBoard} handleLoadVersion={handleLoadVersion} handleImportBoard={handleImportBoard} renderLoading={renderLoading} boardNotFound={boardNotFound} handleInitializeBoard={handleInitializeBoard} />;
       case '/admin/skins':
         return <SkinsView boardSkins={boardSkins} handleCreateSkin={handleCreateSkin} handleDeleteSkin={handleDeleteSkin} />;
       case '/admin/cards':

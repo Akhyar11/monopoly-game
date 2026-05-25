@@ -201,9 +201,9 @@ export class AdminService {
     const db = getDbPool();
     await db.query(
       `
-        UPDATE game_config
-        SET value_json = ?, updated_by = ?
-        WHERE config_key = 'global'
+        INSERT INTO game_config (config_key, value_json, updated_by)
+        VALUES ('global', ?, ?)
+        ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), updated_by = VALUES(updated_by)
       `,
       [JSON.stringify(value), context.adminId],
     );
