@@ -24,6 +24,18 @@ interface AuditLogEntry {
   after: unknown;
 }
 
+const parseJSON = (val: unknown): any => {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'string') {
+    try {
+      return JSON.parse(val);
+    } catch {
+      return val;
+    }
+  }
+  return val;
+};
+
 export class AdminService {
   constructor(private engine: GameEngine) {}
 
@@ -164,8 +176,8 @@ export class AdminService {
       action: row.action,
       targetType: row.target_type,
       targetId: row.target_id,
-      before: row.before_json ? JSON.parse(String(row.before_json)) : null,
-      after: row.after_json ? JSON.parse(String(row.after_json)) : null,
+      before: parseJSON(row.before_json),
+      after: parseJSON(row.after_json),
     }));
   }
 
@@ -190,7 +202,7 @@ export class AdminService {
 
     return {
       key: config.config_key,
-      value: JSON.parse(String(config.value_json)),
+      value: parseJSON(config.value_json),
       updatedBy: config.updated_by,
       updatedAt: new Date(config.updated_at).getTime(),
     };
@@ -274,7 +286,7 @@ export class AdminService {
     return {
       id: board.id,
       versionName: board.version_name,
-      board: JSON.parse(String(board.board_json)),
+      board: parseJSON(board.board_json),
       createdBy: board.created_by,
       skinId: board.skin_id,
       createdAt: new Date(board.created_at).getTime(),
@@ -307,7 +319,7 @@ export class AdminService {
     return {
       id: board.id,
       versionName: board.version_name,
-      board: JSON.parse(String(board.board_json)),
+      board: parseJSON(board.board_json),
       createdBy: board.created_by,
       skinId: board.skin_id,
       createdAt: new Date(board.created_at).getTime(),
@@ -585,7 +597,7 @@ export class AdminService {
       type: row.type,
       title: row.title,
       message: row.message,
-      action: JSON.parse(row.action_json),
+      action: parseJSON(row.action_json),
       createdBy: row.created_by,
       createdAt: new Date(row.created_at).getTime(),
     }));
