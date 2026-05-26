@@ -147,6 +147,50 @@ export const Game: React.FC = () => {
   const [debtTime, setDebtTime] = useState(0);
   const [tradeNotices, setTradeNotices] = useState<Notice[]>([]);
   const [visualPositions, setVisualPositions] = useState<Record<string, number>>({});
+  const [balanceChanges, setBalanceChanges] = useState<Record<string, { amount: number; id: number }>>({});
+  const prevBalancesRef = React.useRef<Record<string, number>>({});
+  const [pendingPopups, setPendingPopups] = useState<Array<{ type: 'property', tile: TileType } | { type: 'card', title: string, message: string }>>([]);
+
+  useEffect(() => {
+    if (!room) return;
+    
+    let hasChanges = false;
+    const nextChanges = { ...balanceChanges };
+
+    room.players.forEach(player => {
+      const oldBalance = prevBalancesRef.current[player.id];
+      if (oldBalance !== undefined && oldBalance !== player.balance) {
+        const diff = player.balance - oldBalance;
+        const currentActive = nextChanges[player.id];
+        const amount = currentActive ? currentActive.amount + diff : diff;
+        nextChanges[player.id] = { amount, id: Date.now() };
+        hasChanges = true;
+      }
+      prevBalancesRef.current[player.id] = player.balance;
+    });
+
+    if (hasChanges) {
+      setBalanceChanges(nextChanges);
+    }
+  }, [room?.players]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      setBalanceChanges(prev => {
+        let changed = false;
+        const next = { ...prev };
+        for (const [playerId, change] of Object.entries(next)) {
+          if (now - change.id > 3000) {
+            delete next[playerId];
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -190,14 +234,12 @@ export const Game: React.FC = () => {
   useEffect(() => {
     socket.on('property_decision', (data) => {
       if (data.playerId === playerId) {
-        setShowPropertyModal({ tile: data.tile });
-        setBuyTimer(15);
+        setPendingPopups(prev => [...prev, { type: 'property', tile: data.tile }]);
       }
     });
 
     socket.on('card_drawn', (data) => {
-      setShowCardModal({ title: data.title, message: data.message });
-      setCardTimer(10);
+      setPendingPopups(prev => [...prev, { type: 'card', title: data.title, message: data.message }]);
     });
 
     socket.on('trade_offer_received', (offer) => {
@@ -228,6 +270,23 @@ export const Game: React.FC = () => {
       socket.off('trade_offer_status');
     };
   }, [playerId]);
+
+  useEffect(() => {
+    const me = room?.players.find((p) => p.id === playerId);
+    if (!me || pendingPopups.length === 0) return;
+
+    if (playerId && visualPositions[playerId] === me.position && !showPropertyModal && !showCardModal) {
+      const popup = pendingPopups[0];
+      if (popup.type === 'property') {
+        setShowPropertyModal({ tile: popup.tile });
+        setBuyTimer(15);
+      } else if (popup.type === 'card') {
+        setShowCardModal({ title: popup.title, message: popup.message });
+        setCardTimer(10);
+      }
+      setPendingPopups((prev) => prev.slice(1));
+    }
+  }, [visualPositions, room?.players, pendingPopups, playerId, showPropertyModal, showCardModal]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -413,7 +472,22 @@ export const Game: React.FC = () => {
                   {player.status === 'bankrupt' && <div className="absolute inset-0 flex items-center justify-center bg-red-950/60 font-bold text-red-500 backdrop-blur-[1px]">BANKRUPT</div>}
                   <div className="mb-1 flex items-center justify-between">
                     <span className="flex items-center gap-2 text-lg font-semibold">{player.avatar} {player.name}</span>
-                    <span className="font-mono font-bold text-green-400">${player.balance}</span>
+                    <div className="relative flex items-center">
+                      <span className="font-mono font-bold text-green-400">${player.balance}</span>
+                      <AnimatePresence>
+                        {balanceChanges[player.id] && (
+                          <motion.span
+                            key={balanceChanges[player.id].id}
+                            initial={{ opacity: 0, y: 10, scale: 0.8 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            className={`absolute right-0 top-6 text-sm font-bold drop-shadow-md ${balanceChanges[player.id].amount > 0 ? 'text-green-300' : 'text-red-400'}`}
+                          >
+                            {balanceChanges[player.id].amount > 0 ? '+' : ''}{balanceChanges[player.id].amount}
+                          </motion.span>
+                        )}
+                      </AnimatePresence>
+                    </div>
                   </div>
                   <div className="flex justify-between text-xs text-slate-400">
                     <span className="rounded-md bg-slate-900 px-2 py-0.5 uppercase tracking-wider">
@@ -427,13 +501,35 @@ export const Game: React.FC = () => {
           </div>
 
           <div className="glassmorphism flex h-[350px] lg:h-auto lg:flex-1 min-h-[250px] flex-col overflow-hidden rounded-2xl p-4">
-            <h3 className="mb-3 text-lg font-bold">Event Log</h3>
-            <div className="custom-scrollbar flex flex-grow flex-col-reverse gap-2 overflow-y-auto pr-2">
-              {[...room.eventLog].reverse().map((log, index) => (
-                <div key={`${room.eventLog.length - index}-${log.slice(0, 10)}`} className="animate-fade-in rounded-lg border-l-2 border-slate-600 bg-slate-800/40 p-2 text-sm text-slate-300">
-                  {log}
-                </div>
-              ))}
+            <h3 className="mb-3 text-lg font-bold">Other Players' Assets</h3>
+            <div className="custom-scrollbar flex flex-grow flex-col gap-4 overflow-y-auto pr-2">
+              {otherPlayers.length === 0 && <div className="text-sm text-slate-400 text-center mt-4">No other active players.</div>}
+              {otherPlayers.map((player) => {
+                const playerTiles = room.board.filter((tile) => tile.ownerPlayerId === player.id);
+                if (playerTiles.length === 0) return null;
+                
+                return (
+                  <div key={player.id} className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2 font-semibold text-slate-300 border-b border-slate-700/50 pb-1">
+                      {player.avatar} {player.name}
+                    </div>
+                    <div className="space-y-2">
+                      {playerTiles.map((tile) => (
+                        <div key={tile.id} className="rounded-lg border border-slate-700/50 bg-slate-800/40 p-2 text-sm text-slate-300 transition-colors hover:bg-slate-800/60">
+                          <div className="flex items-center gap-2">
+                            {tile.colorGroup && <span className={`h-2.5 w-2.5 rounded-full shadow-sm ${colorMap[tile.colorGroup]}`} />}
+                            <span className="font-bold text-white text-xs">{tile.name}</span>
+                          </div>
+                          <div className="mt-1.5 flex justify-between text-[11px] text-slate-400">
+                            <span className="text-rose-300">Rent: {rentLabel(room, tile)}</span>
+                            <span className="text-amber-300 font-medium">{buildingLabel(tile)}{tile.isMortgaged ? ' • Mortgaged' : ''}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -604,7 +700,22 @@ export const Game: React.FC = () => {
             <div className="mb-6">
               <div className="mb-2 text-4xl">{me.avatar}</div>
               <h2 className="text-xl font-bold">{me.name}</h2>
-              <p className="font-mono text-2xl font-bold text-green-400">${me.balance}</p>
+              <div className="relative inline-flex items-center justify-center">
+                <p className="font-mono text-2xl font-bold text-green-400">${me.balance}</p>
+                <AnimatePresence>
+                  {balanceChanges[me.id] && (
+                    <motion.span
+                      key={balanceChanges[me.id].id}
+                      initial={{ opacity: 0, y: 10, scale: 0.8 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className={`absolute -right-12 top-0 text-lg font-bold drop-shadow-lg ${balanceChanges[me.id].amount > 0 ? 'text-green-300' : 'text-red-400'}`}
+                    >
+                      {balanceChanges[me.id].amount > 0 ? '+' : ''}{balanceChanges[me.id].amount}
+                    </motion.span>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
 
             <button
@@ -683,6 +794,119 @@ export const Game: React.FC = () => {
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {incomingOffer && (
+            <div className={`glassmorphism rounded-2xl border border-cyan-500/40 p-5 ${inDebtMode ? 'opacity-60' : ''}`}>
+              <h3 className="mb-2 flex items-center justify-between text-lg font-bold text-cyan-300">
+                <span>Incoming Trade Offer</span>
+                <span className="rounded bg-cyan-500/20 px-2 py-0.5 text-sm font-mono">{incomingOfferSeconds}s</span>
+              </h3>
+              <p className="mb-3 text-sm text-slate-300">
+                {room.players.find((player) => player.id === incomingOffer.fromPlayerId)?.name} wants to trade with you.
+              </p>
+              {inDebtMode && (
+                <div className="mb-3 rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-100">
+                  Respons trade dikunci selama kamu masih dalam mode utang.
+                </div>
+              )}
+              <div className="space-y-2 rounded-xl bg-slate-900/60 p-3 text-sm text-slate-300">
+                <div>
+                  They offer: {incomingOffer.offeredPropertyIds.length > 0 ? incomingOffer.offeredPropertyIds.map((id) => ownTileLookup[id]?.name).join(', ') : 'No property'}
+                  {incomingOffer.offeredCash > 0 ? ` + $${incomingOffer.offeredCash}` : ''}
+                </div>
+                <div>
+                  They want: {incomingOffer.requestedPropertyIds.length > 0 ? incomingOffer.requestedPropertyIds.map((id) => ownTileLookup[id]?.name).join(', ') : 'No property'}
+                  {incomingOffer.requestedCash > 0 ? ` + $${incomingOffer.requestedCash}` : ''}
+                </div>
+              </div>
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={() => {
+                    socket.emit('respond_trade_offer', { code: room.code, offerId: incomingOffer.id, decision: 'accept' });
+                    setIncomingOfferId(null);
+                  }}
+                  disabled={inDebtMode}
+                  className="flex-1 rounded-xl bg-emerald-500 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-400 disabled:opacity-50"
+                >
+                  Accept
+                </button>
+                <button
+                  onClick={() => {
+                    setTradeDraft({
+                      toPlayerId: incomingOffer.fromPlayerId,
+                      offeredPropertyIds: [...incomingOffer.requestedPropertyIds],
+                      requestedPropertyIds: [...incomingOffer.offeredPropertyIds],
+                      offeredCash: incomingOffer.requestedCash,
+                      requestedCash: incomingOffer.offeredCash,
+                    });
+                    socket.emit('respond_trade_offer', { code: room.code, offerId: incomingOffer.id, decision: 'reject' });
+                    setIncomingOfferId(null);
+                    // optionally scroll to trade center
+                    document.getElementById('trade-center-section')?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  disabled={inDebtMode}
+                  className="flex-1 rounded-xl bg-blue-600 py-2.5 text-sm font-bold text-white transition hover:bg-blue-500 disabled:opacity-50"
+                >
+                  Counter
+                </button>
+                <button
+                  onClick={() => {
+                    socket.emit('respond_trade_offer', { code: room.code, offerId: incomingOffer.id, decision: 'reject' });
+                    setIncomingOfferId(null);
+                  }}
+                  disabled={inDebtMode}
+                  className="flex-1 rounded-xl bg-slate-700 py-2.5 text-sm font-bold text-white transition hover:bg-slate-600 disabled:opacity-50"
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          )}
+
+          {showPropertyModal && me.status !== 'auction' && (
+            <div className="glassmorphism relative overflow-hidden rounded-2xl border border-yellow-500/30 p-6 shadow-[0_0_30px_rgba(234,179,8,0.15)]">
+              <div className="absolute left-0 top-0 h-1 bg-yellow-500 transition-all duration-1000" style={{ width: `${(buyTimer / 15) * 100}%` }} />
+              <h3 className="mb-1 flex items-center justify-between text-xl font-bold text-yellow-400">
+                <span className="flex items-center gap-2"><AlertCircle className="h-5 w-5" /> Buy Property?</span>
+                <span className="rounded bg-yellow-500/20 px-2 py-0.5 text-sm font-mono">{buyTimer}s</span>
+              </h3>
+              <p className="mb-4 text-sm text-slate-300">You landed on an unowned property.</p>
+
+              <div className="mb-6 rounded-xl border border-slate-700 bg-slate-800 p-4">
+                <div className="mb-2 text-lg font-bold text-white">{showPropertyModal.tile.name}</div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-400">Price</span>
+                  <span className="font-mono font-bold text-green-400">${showPropertyModal.tile.price}</span>
+                </div>
+                <div className="mt-1 flex justify-between text-sm">
+                  <span className="text-slate-400">Rent</span>
+                  <span className="font-mono font-bold text-rose-400">${showPropertyModal.tile.rent}</span>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button onClick={() => handlePropertyDecision('buy')} className="flex-1 rounded-xl bg-green-500 py-3 font-bold text-white transition hover:bg-green-400">
+                  Buy
+                </button>
+                <button onClick={() => handlePropertyDecision('skip')} className="flex-1 rounded-xl bg-slate-700 py-3 font-bold text-white transition hover:bg-slate-600">
+                  Skip
+                </button>
+              </div>
+            </div>
+          )}
+
+          {showCardModal && me.status !== 'auction' && (
+            <div className="glassmorphism relative overflow-hidden rounded-2xl border border-blue-500/30 p-6 shadow-[0_0_30px_rgba(59,130,246,0.15)]">
+              <div className="absolute left-0 top-0 h-1 bg-blue-500 transition-all duration-1000" style={{ width: `${(cardTimer / 10) * 100}%` }} />
+              <h3 className="mb-2 text-center text-2xl font-bold text-blue-400">{showCardModal.title}</h3>
+              <div className="mb-6 flex min-h-[120px] flex-col items-center justify-center rounded-xl border border-slate-700 bg-slate-800 p-6 text-center">
+                <span className="text-xl font-bold text-white">{showCardModal.message}</span>
+              </div>
+              <button onClick={() => setShowCardModal(null)} className="w-full rounded-xl bg-blue-500 py-3 font-bold text-white transition hover:bg-blue-400">
+                OK
+              </button>
             </div>
           )}
 
@@ -875,118 +1099,7 @@ export const Game: React.FC = () => {
             </div>
           </div>
 
-          {incomingOffer && (
-            <div className={`glassmorphism rounded-2xl border border-cyan-500/40 p-5 ${inDebtMode ? 'opacity-60' : ''}`}>
-              <h3 className="mb-2 flex items-center justify-between text-lg font-bold text-cyan-300">
-                <span>Incoming Trade Offer</span>
-                <span className="rounded bg-cyan-500/20 px-2 py-0.5 text-sm font-mono">{incomingOfferSeconds}s</span>
-              </h3>
-              <p className="mb-3 text-sm text-slate-300">
-                {room.players.find((player) => player.id === incomingOffer.fromPlayerId)?.name} wants to trade with you.
-              </p>
-              {inDebtMode && (
-                <div className="mb-3 rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-100">
-                  Respons trade dikunci selama kamu masih dalam mode utang.
-                </div>
-              )}
-              <div className="space-y-2 rounded-xl bg-slate-900/60 p-3 text-sm text-slate-300">
-                <div>
-                  They offer: {incomingOffer.offeredPropertyIds.length > 0 ? incomingOffer.offeredPropertyIds.map((id) => ownTileLookup[id]?.name).join(', ') : 'No property'}
-                  {incomingOffer.offeredCash > 0 ? ` + $${incomingOffer.offeredCash}` : ''}
-                </div>
-                <div>
-                  They want: {incomingOffer.requestedPropertyIds.length > 0 ? incomingOffer.requestedPropertyIds.map((id) => ownTileLookup[id]?.name).join(', ') : 'No property'}
-                  {incomingOffer.requestedCash > 0 ? ` + $${incomingOffer.requestedCash}` : ''}
-                </div>
-              </div>
-              <div className="mt-4 flex gap-2">
-                <button
-                  onClick={() => {
-                    socket.emit('respond_trade_offer', { code: room.code, offerId: incomingOffer.id, decision: 'accept' });
-                    setIncomingOfferId(null);
-                  }}
-                  disabled={inDebtMode}
-                  className="flex-1 rounded-xl bg-emerald-500 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-400 disabled:opacity-50"
-                >
-                  Accept
-                </button>
-                <button
-                  onClick={() => {
-                    setTradeDraft({
-                      toPlayerId: incomingOffer.fromPlayerId,
-                      offeredPropertyIds: [...incomingOffer.requestedPropertyIds],
-                      requestedPropertyIds: [...incomingOffer.offeredPropertyIds],
-                      offeredCash: incomingOffer.requestedCash,
-                      requestedCash: incomingOffer.offeredCash,
-                    });
-                    socket.emit('respond_trade_offer', { code: room.code, offerId: incomingOffer.id, decision: 'reject' });
-                    setIncomingOfferId(null);
-                    // optionally scroll to trade center
-                    document.getElementById('trade-center-section')?.scrollIntoView({ behavior: 'smooth' });
-                  }}
-                  disabled={inDebtMode}
-                  className="flex-1 rounded-xl bg-blue-600 py-2.5 text-sm font-bold text-white transition hover:bg-blue-500 disabled:opacity-50"
-                >
-                  Counter
-                </button>
-                <button
-                  onClick={() => {
-                    socket.emit('respond_trade_offer', { code: room.code, offerId: incomingOffer.id, decision: 'reject' });
-                    setIncomingOfferId(null);
-                  }}
-                  disabled={inDebtMode}
-                  className="flex-1 rounded-xl bg-slate-700 py-2.5 text-sm font-bold text-white transition hover:bg-slate-600 disabled:opacity-50"
-                >
-                  Reject
-                </button>
-              </div>
-            </div>
-          )}
 
-          {showPropertyModal && me.status !== 'auction' && (
-            <div className="glassmorphism relative overflow-hidden rounded-2xl border border-yellow-500/30 p-6 shadow-[0_0_30px_rgba(234,179,8,0.15)]">
-              <div className="absolute left-0 top-0 h-1 bg-yellow-500 transition-all duration-1000" style={{ width: `${(buyTimer / 15) * 100}%` }} />
-              <h3 className="mb-1 flex items-center justify-between text-xl font-bold text-yellow-400">
-                <span className="flex items-center gap-2"><AlertCircle className="h-5 w-5" /> Buy Property?</span>
-                <span className="rounded bg-yellow-500/20 px-2 py-0.5 text-sm font-mono">{buyTimer}s</span>
-              </h3>
-              <p className="mb-4 text-sm text-slate-300">You landed on an unowned property.</p>
-
-              <div className="mb-6 rounded-xl border border-slate-700 bg-slate-800 p-4">
-                <div className="mb-2 text-lg font-bold text-white">{showPropertyModal.tile.name}</div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Price</span>
-                  <span className="font-mono font-bold text-green-400">${showPropertyModal.tile.price}</span>
-                </div>
-                <div className="mt-1 flex justify-between text-sm">
-                  <span className="text-slate-400">Rent</span>
-                  <span className="font-mono font-bold text-rose-400">${showPropertyModal.tile.rent}</span>
-                </div>
-              </div>
-
-              <div className="flex gap-3">
-                <button onClick={() => handlePropertyDecision('buy')} className="flex-1 rounded-xl bg-green-500 py-3 font-bold text-white transition hover:bg-green-400">
-                  Buy
-                </button>
-                <button onClick={() => handlePropertyDecision('skip')} className="flex-1 rounded-xl bg-slate-700 py-3 font-bold text-white transition hover:bg-slate-600">
-                  Skip
-                </button>
-              </div>
-            </div>
-          )}
-
-          {showCardModal && me.status !== 'auction' && (
-            <div className="glassmorphism relative overflow-hidden rounded-2xl border border-blue-500/30 p-6 shadow-[0_0_30px_rgba(59,130,246,0.15)]">
-              <div className="absolute left-0 top-0 h-1 bg-blue-500 transition-all duration-1000" style={{ width: `${(cardTimer / 10) * 100}%` }} />
-              <h3 className="mb-2 text-center text-2xl font-bold text-blue-400">{showCardModal.title}</h3>
-              <div className="mb-6 flex min-h-[120px] flex-col items-center justify-center rounded-xl border border-slate-700 bg-slate-800 p-6 text-center">
-                <span className="text-xl font-bold text-white">{showCardModal.message}</span>
-              </div>
-              <button onClick={() => setShowCardModal(null)} className="w-full rounded-xl bg-blue-500 py-3 font-bold text-white transition hover:bg-blue-400">
-                OK
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </div>
