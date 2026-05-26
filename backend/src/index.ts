@@ -36,8 +36,12 @@ const engine = new GameEngine(
   (_code, playerId, data) => {
     io.to(playerId).emit('trade_offer_status', data);
   },
-  (code, sfxKey) => {
-    io.to(code).emit('play_sfx', sfxKey);
+  (code, sfxKey, playerId) => {
+    if (playerId) {
+      io.to(playerId).emit('play_sfx', sfxKey);
+    } else {
+      io.to(code).emit('play_sfx', sfxKey);
+    }
   }
 );
 const adminService = new AdminService(engine);

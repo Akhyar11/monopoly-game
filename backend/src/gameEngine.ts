@@ -17,7 +17,7 @@ export class GameEngine {
   constructor(
     private onStateChange?: (code: string, room: Room) => void,
     private onTradeStatus?: (code: string, playerId: string, data: { offerId: string; status: 'accepted' | 'rejected' | 'expired' | 'sent'; message: string }) => void,
-    private onSfxPlay?: (code: string, sfxKey: string) => void,
+    private onSfxPlay?: (code: string, sfxKey: string, playerId?: string) => void,
   ) {}
 
   createRoom(hostId: string, hostName: string, avatar: string, boardTemplate?: Tile[], skin?: BoardSkin | null, sfx?: Record<string, string>): { code: string; room: Room } {
@@ -162,7 +162,7 @@ export class GameEngine {
       const config = getGameConfig();
       player.balance += config.passGoReward;
       this.addEventLog(room, `${player.name} passed GO and collected ${config.passGoReward}`);
-      this.onSfxPlay?.(room.code, 'passGo');
+      this.onSfxPlay?.(room.code, 'passGo', player.id);
     }
 
     const currentTile = room.board[player.position];
@@ -679,7 +679,7 @@ export class GameEngine {
         player.position = room.board.findIndex((boardTile) => boardTile.type === 'jail');
         player.status = 'jailed';
         this.addEventLog(room, `${player.name} went to jail! (Must pay $${getGameConfig().jailFee} or wait for round reset)`);
-        this.onSfxPlay?.(room.code, 'jail');
+        this.onSfxPlay?.(room.code, 'jail', player.id);
         break;
       case 'chance':
       case 'chest': {
@@ -698,7 +698,7 @@ export class GameEngine {
             const card = rows[0];
             const action = JSON.parse(card.action_json) as CardAction;
             cardDrawn = { title: card.title, message: card.message };
-            this.onSfxPlay?.(room.code, 'cardDrawn');
+            this.onSfxPlay?.(room.code, 'cardDrawn', player.id);
             
             const targetType = action.target || 'self';
             const targets = targetType === 'everyone' ? room.players : 
