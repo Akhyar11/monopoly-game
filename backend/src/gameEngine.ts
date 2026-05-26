@@ -805,6 +805,7 @@ export class GameEngine {
         const timeout = this.decisionTimeouts.get(other.id);
         if (timeout) clearTimeout(timeout);
         this.decisionTimeouts.delete(other.id);
+        other.status = 'auction';
       });
 
       player.status = 'auction';
