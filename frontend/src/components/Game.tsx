@@ -468,8 +468,8 @@ export const Game: React.FC = () => {
             <h3 className="mb-3 flex items-center gap-2 text-lg font-bold"><LandPlot className="h-5 w-5 text-blue-400" /> Players</h3>
             <div className="space-y-3">
               {room.players.map((player) => (
-                <div key={player.id} className={`relative overflow-hidden rounded-xl border p-3 ${player.id === playerId ? 'border-blue-500/50 bg-blue-500/20' : 'border-slate-700/50 bg-slate-800/50'}`}>
-                  {player.status === 'bankrupt' && <div className="absolute inset-0 flex items-center justify-center bg-red-950/60 font-bold text-red-500 backdrop-blur-[1px]">BANKRUPT</div>}
+                <div key={player.id} className={`relative rounded-xl border p-3 ${player.id === playerId ? 'border-blue-500/50 bg-blue-500/20' : 'border-slate-700/50 bg-slate-800/50'}`}>
+                  {player.status === 'bankrupt' && <div className="absolute inset-0 z-10 rounded-xl flex items-center justify-center bg-red-950/60 font-bold text-red-500 backdrop-blur-[1px]">BANKRUPT</div>}
                   <div className="mb-1 flex items-center justify-between">
                     <span className="flex items-center gap-2 text-lg font-semibold">{player.avatar} {player.name}</span>
                     <div className="relative flex items-center">
@@ -481,7 +481,7 @@ export const Game: React.FC = () => {
                             initial={{ opacity: 0, y: 10, scale: 0.8 }}
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: -10 }}
-                            className={`absolute right-0 top-6 text-sm font-bold drop-shadow-md ${balanceChanges[player.id].amount > 0 ? 'text-green-300' : 'text-red-400'}`}
+                            className={`absolute right-0 top-6 z-50 text-sm font-bold drop-shadow-md ${balanceChanges[player.id].amount > 0 ? 'text-green-300' : 'text-red-400'}`}
                           >
                             {balanceChanges[player.id].amount > 0 ? '+' : ''}{balanceChanges[player.id].amount}
                           </motion.span>
@@ -696,7 +696,7 @@ export const Game: React.FC = () => {
         </div>
 
         <div className="w-full lg:w-[24rem] flex flex-col gap-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto custom-scrollbar">
-          <div className="glassmorphism rounded-2xl p-6 text-center">
+          <div className="glassmorphism rounded-2xl p-6 text-center shrink-0">
             <div className="mb-6">
               <div className="mb-2 text-4xl">{me.avatar}</div>
               <h2 className="text-xl font-bold">{me.name}</h2>
@@ -709,7 +709,7 @@ export const Game: React.FC = () => {
                       initial={{ opacity: 0, y: 10, scale: 0.8 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -10 }}
-                      className={`absolute -right-12 top-0 text-lg font-bold drop-shadow-lg ${balanceChanges[me.id].amount > 0 ? 'text-green-300' : 'text-red-400'}`}
+                      className={`absolute -right-12 top-0 z-50 text-lg font-bold drop-shadow-lg ${balanceChanges[me.id].amount > 0 ? 'text-green-300' : 'text-red-400'}`}
                     >
                       {balanceChanges[me.id].amount > 0 ? '+' : ''}{balanceChanges[me.id].amount}
                     </motion.span>
@@ -724,7 +724,7 @@ export const Game: React.FC = () => {
               className={`flex w-full items-center justify-center gap-3 rounded-2xl py-4 text-xl font-black transition-all ${canRoll ? 'bg-gradient-to-r from-emerald-400 to-teal-500 text-slate-900 shadow-[0_0_20px_rgba(52,211,153,0.4)] hover:scale-105' : 'cursor-not-allowed bg-slate-800 text-slate-500'}`}
             >
               <Dices className="h-6 w-6" />
-              {canRoll ? 'ROLL DICE' : cooldownTime > 0 ? `COOLDOWN (${(cooldownTime / 1000).toFixed(1)}s)` : !hasQuota ? 'WAITING FOR OTHERS...' : 'WAITING...'}
+              {canRoll ? 'ROLL DICE' : cooldownTime > 0 ? `COOLDOWN (${(cooldownTime / 1000).toFixed(1)}s)` : !hasQuota ? 'WAITING...' : 'WAITING...'}
             </button>
 
             {me.status === 'jailed' && (
@@ -755,7 +755,7 @@ export const Game: React.FC = () => {
           </div>
 
           {amInAuction && room.auction && auctionTile && (
-            <div className="glassmorphism relative mt-0 overflow-hidden rounded-2xl border border-purple-500/50 p-6 shadow-[0_0_30px_rgba(168,85,247,0.2)]">
+            <div className="glassmorphism relative mt-0 overflow-hidden rounded-2xl border border-purple-500/50 p-6 shadow-[0_0_30px_rgba(168,85,247,0.2)] shrink-0">
               <div className="absolute left-0 top-0 h-1 bg-purple-500 transition-all duration-1000" style={{ width: `${(auctionTimer / 30) * 100}%` }} />
               <h3 className="mb-1 flex items-center justify-between text-xl font-bold text-purple-400">
                 <span>⚖️ Auction!</span>
@@ -798,7 +798,7 @@ export const Game: React.FC = () => {
           )}
 
           {incomingOffer && (
-            <div className={`glassmorphism rounded-2xl border border-cyan-500/40 p-5 ${inDebtMode ? 'opacity-60' : ''}`}>
+            <div className={`glassmorphism rounded-2xl border border-cyan-500/40 p-5 ${inDebtMode ? 'opacity-60' : ''} shrink-0`}>
               <h3 className="mb-2 flex items-center justify-between text-lg font-bold text-cyan-300">
                 <span>Incoming Trade Offer</span>
                 <span className="rounded bg-cyan-500/20 px-2 py-0.5 text-sm font-mono">{incomingOfferSeconds}s</span>
@@ -866,7 +866,7 @@ export const Game: React.FC = () => {
           )}
 
           {showPropertyModal && me.status !== 'auction' && (
-            <div className="glassmorphism relative overflow-hidden rounded-2xl border border-yellow-500/30 p-6 shadow-[0_0_30px_rgba(234,179,8,0.15)]">
+            <div className="glassmorphism relative overflow-hidden rounded-2xl border border-yellow-500/30 p-6 shadow-[0_0_30px_rgba(234,179,8,0.15)] shrink-0">
               <div className="absolute left-0 top-0 h-1 bg-yellow-500 transition-all duration-1000" style={{ width: `${(buyTimer / 15) * 100}%` }} />
               <h3 className="mb-1 flex items-center justify-between text-xl font-bold text-yellow-400">
                 <span className="flex items-center gap-2"><AlertCircle className="h-5 w-5" /> Buy Property?</span>
@@ -898,7 +898,7 @@ export const Game: React.FC = () => {
           )}
 
           {showCardModal && me.status !== 'auction' && (
-            <div className="glassmorphism relative overflow-hidden rounded-2xl border border-blue-500/30 p-6 shadow-[0_0_30px_rgba(59,130,246,0.15)]">
+            <div className="glassmorphism relative overflow-hidden rounded-2xl border border-blue-500/30 p-6 shadow-[0_0_30px_rgba(59,130,246,0.15)] shrink-0">
               <div className="absolute left-0 top-0 h-1 bg-blue-500 transition-all duration-1000" style={{ width: `${(cardTimer / 10) * 100}%` }} />
               <h3 className="mb-2 text-center text-2xl font-bold text-blue-400">{showCardModal.title}</h3>
               <div className="mb-6 flex min-h-[120px] flex-col items-center justify-center rounded-xl border border-slate-700 bg-slate-800 p-6 text-center">
@@ -910,7 +910,7 @@ export const Game: React.FC = () => {
             </div>
           )}
 
-          <div className={`glassmorphism rounded-2xl p-5 ${inDebtMode ? 'ring-2 ring-red-500/50' : ''}`}>
+          <div className={`glassmorphism rounded-2xl p-5 ${inDebtMode ? 'ring-2 ring-red-500/50' : ''} shrink-0`}>
             <h3 className="mb-3 flex items-center gap-2 text-lg font-bold"><Building2 className="h-5 w-5 text-amber-400" /> Your Assets</h3>
             {inDebtMode && (
               <div className="mb-3 rounded-2xl border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-100">
